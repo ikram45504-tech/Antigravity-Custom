@@ -24,9 +24,9 @@ class CoreServerService : Service() {
 
     companion object {
         private const val TAG = "CoreServerService"
-        const val ACTION_START = "id.vern.antigravity.action.START"
-        const val ACTION_STOP = "id.vern.antigravity.action.STOP"
-        const val ACTION_RESTART = "id.vern.antigravity.action.RESTART"
+        const val ACTION_START = "id.ikram.antigravity.action.START"
+        const val ACTION_STOP = "id.ikram.antigravity.action.STOP"
+        const val ACTION_RESTART = "id.ikram.antigravity.action.RESTART"
 
         fun startService(context: Context) {
             val intent = Intent(context, CoreServerService::class.java).apply {

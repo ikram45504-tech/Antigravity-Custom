@@ -174,6 +174,8 @@
     <string name="about_repo_desc">Native Android client for Google Antigravity</string>
     <string name="about_contrib_vern_title">Vern (KuatoDev)</string>
     <string name="about_contrib_vern_desc">Android application architecture, native Kotlin implementation, Jetpack Compose UI, and Google OAuth flow.</string>
+    <string name="about_contrib_ikram_title">Ikram (ikram45504-tech)</string>
+    <string name="about_contrib_ikram_desc">Fork maintainer, Antigravity Custom branding, package ID customization, and release management.</string>
     <string name="about_contrib_werdik_title">Werdik (werdio325-png)</string>
     <string name="about_contrib_werdik_desc">Android userspace environment (env/), pkg package manager (Bash/AWK), and agy-daemon scheduler.</string>
     <string name="about_contrib_termux_title">Termux Project</string>
