@@ -130,6 +130,28 @@ class LiveVoiceController(
         }
     }
 
+    /**
+     * Releases microphone and audio focus when the UI leaves the foreground while keeping session state paused.
+     */
+    fun pause() {
+        mainHandler.post {
+            val cur = mutableState.value
+            if (!cur.active) return@post
+            mainHandler.removeCallbacksAndMessages(null)
+            pendingSpeechAfterInit = null
+            stopRecognizerInternal()
+            tts?.stop()
+            abandonAudioFocus()
+            mutableState.update {
+                it.copy(
+                    isMuted = true,
+                    phase = LiveVoicePhase.PAUSED,
+                    partialTranscript = ""
+                )
+            }
+        }
+    }
+
     fun destroy() {
         mainHandler.post {
             mainHandler.removeCallbacksAndMessages(null)
@@ -161,6 +183,7 @@ class LiveVoiceController(
             } else {
                 mutableState.update { it.copy(isMuted = false) }
                 if (cur.phase == LiveVoicePhase.PAUSED || cur.phase == LiveVoicePhase.LISTENING) {
+                    requestAudioFocus()
                     mutableState.update { it.copy(phase = LiveVoicePhase.LISTENING) }
                     startListeningInternal()
                 }

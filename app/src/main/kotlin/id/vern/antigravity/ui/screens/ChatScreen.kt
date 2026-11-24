@@ -115,6 +115,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import id.vern.antigravity.data.MessageRole
 import id.vern.antigravity.data.ProjectSortOrder
 import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -158,6 +161,7 @@ fun ChatScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
@@ -205,12 +209,19 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     val terminalReq by viewModel.openTerminalRequest.collectAsStateWithLifecycle()
 
+    var awaitingVoiceConvId by remember { mutableStateOf<String?>(null) }
     var awaitingVoiceTurnBaselineId by remember { mutableStateOf<String?>(null) }
     var awaitingVoiceResponse by remember { mutableStateOf(false) }
 
     val liveVoiceController = remember(context) {
         LiveVoiceController(context) { spokenText ->
-            awaitingVoiceTurnBaselineId = viewModel.chatMessages.value.lastOrNull()?.id
+            val targetConvId = viewModel.activeConversationId.value
+            awaitingVoiceConvId = targetConvId
+            awaitingVoiceTurnBaselineId = if (targetConvId != null) {
+                viewModel.getMessagesForConversation(targetConvId).lastOrNull()?.id
+            } else {
+                viewModel.chatMessages.value.lastOrNull()?.id
+            }
             awaitingVoiceResponse = true
             viewModel.sendMessage(context, spokenText)
         }
@@ -219,6 +230,16 @@ fun ChatScreen(
 
     DisposableEffect(liveVoiceController) {
         onDispose { liveVoiceController.destroy() }
+    }
+
+    DisposableEffect(lifecycleOwner, liveVoiceController) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                liveVoiceController.pause()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
@@ -238,6 +259,7 @@ fun ChatScreen(
     val toggleLiveVoice: () -> Unit = {
         if (liveVoiceState.active) {
             awaitingVoiceResponse = false
+            awaitingVoiceConvId = null
             liveVoiceController.stop()
         } else {
             val hasMicPerm = ContextCompat.checkSelfPermission(
@@ -252,19 +274,42 @@ fun ChatScreen(
         }
     }
 
-    LaunchedEffect(messages, isExecuting, activeConversationId, liveVoiceState.active, awaitingVoiceResponse) {
+    LaunchedEffect(
+        messages,
+        isExecuting,
+        activeConversationId,
+        executingConversationIds,
+        liveVoiceState.active,
+        awaitingVoiceResponse,
+        awaitingVoiceConvId
+    ) {
         if (!liveVoiceState.active) {
             awaitingVoiceResponse = false
+            awaitingVoiceConvId = null
             return@LaunchedEffect
         }
         if (!awaitingVoiceResponse) return@LaunchedEffect
-        val latestAssistant = messages.lastOrNull { it.role == MessageRole.ASSISTANT }
+        val targetConvId = awaitingVoiceConvId
+        val targetMessages = if (targetConvId != null) {
+            viewModel.getMessagesForConversation(targetConvId).ifEmpty {
+                if (activeConversationId == targetConvId) messages else emptyList()
+            }
+        } else {
+            messages
+        }
+        val targetExecuting = if (targetConvId != null) {
+            targetConvId in executingConversationIds
+        } else {
+            isExecuting
+        }
+        val latestAssistant = targetMessages.lastOrNull { it.role == MessageRole.ASSISTANT }
         if (latestAssistant != null &&
             latestAssistant.id != awaitingVoiceTurnBaselineId &&
             latestAssistant.status != MessageStatus.SENDING &&
-            !isExecuting
+            !targetExecuting
         ) {
             awaitingVoiceResponse = false
+            awaitingVoiceConvId = null
             liveVoiceController.onAssistantCompleted(
                 markdown = latestAssistant.content,
                 isSuccess = latestAssistant.status == MessageStatus.SENT
@@ -1753,6 +1798,17 @@ fun ChatScreen(
                     externalInputText = pendingInputText,
                     onExternalInputTextConsumed = { viewModel.clearPendingInputText() },
                     onSendMessage = { text ->
+                        if (liveVoiceState.active) {
+                            val targetConvId = viewModel.activeConversationId.value
+                            awaitingVoiceConvId = targetConvId
+                            awaitingVoiceTurnBaselineId = if (targetConvId != null) {
+                                viewModel.getMessagesForConversation(targetConvId).lastOrNull()?.id
+                            } else {
+                                messages.lastOrNull()?.id
+                            }
+                            awaitingVoiceResponse = true
+                            liveVoiceController.onTurnStarted()
+                        }
                         viewModel.sendMessage(context, text)
                         scope.launch {
                             kotlinx.coroutines.delay(60)
@@ -1833,123 +1889,69 @@ fun ChatScreen(
     }
 
     if (showRenameDialog) {
-        var newTitleText by remember(conversationTitle) { mutableStateOf(conversationTitle) }
-        AlertDialog(
-            onDismissRequest = { showRenameDialog = false },
-            shape = RoundedCornerShape(16.dp),
-            title = {
-                DialogBlurEffect()
-                Text(stringResource(R.string.dialog_rename_convo_title), fontWeight = FontWeight.Bold)
-            },
-            text = {
-                OutlinedTextField(
-                    value = newTitleText,
-                    onValueChange = { newTitleText = it },
-                    label = { Text(stringResource(R.string.dialog_rename_convo_label)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().animateContentSize()
-                )
-            },
-            confirmButton = {
-                Button(
-                    shape = RoundedCornerShape(8.dp),
-                    onClick = {
-                        if (newTitleText.isNotBlank()) {
-                            viewModel.renameConversation(newTitleText, context = context)
-                            Toast.makeText(context, context.getString(R.string.toast_conversation_renamed), Toast.LENGTH_SHORT).show()
-                        }
-                        showRenameDialog = false
-                    }
-                ) {
-                    Text(stringResource(R.string.dialog_rename_convo_save))
+        RenameConversationDialog(
+            currentTitle = conversationTitle,
+            onDismiss = { showRenameDialog = false },
+            onConfirm = { newTitleText ->
+                if (newTitleText.isNotBlank()) {
+                    viewModel.renameConversation(newTitleText, context = context)
+                    Toast.makeText(context, context.getString(R.string.toast_conversation_renamed), Toast.LENGTH_SHORT).show()
                 }
+                showRenameDialog = false
             }
         )
     }
 
     if (showDeleteConversationDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteConversationDialog = false },
-            shape = RoundedCornerShape(16.dp),
-            title = {
-                DialogBlurEffect()
-                Text(stringResource(R.string.dialog_delete_convo_title), fontWeight = FontWeight.Bold)
-            },
-            text = { Text(stringResource(R.string.dialog_delete_convo_msg)) },
-            confirmButton = {
-                Button(
-                    shape = RoundedCornerShape(8.dp),
-                    onClick = {
-                        viewModel.deleteCurrentConversation(context)
-                        showDeleteConversationDialog = false
-                        Toast.makeText(context, context.getString(R.string.toast_conversation_deleted), Toast.LENGTH_SHORT).show()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue)
-                ) {
-                    Text(stringResource(R.string.dialog_delete_btn))
-                }
+        ConfirmActionDialog(
+            title = stringResource(R.string.dialog_delete_convo_title),
+            message = stringResource(R.string.dialog_delete_convo_msg),
+            confirmText = stringResource(R.string.dialog_delete_btn),
+            onDismiss = { showDeleteConversationDialog = false },
+            onConfirm = {
+                viewModel.deleteCurrentConversation(context)
+                showDeleteConversationDialog = false
+                Toast.makeText(context, context.getString(R.string.toast_conversation_deleted), Toast.LENGTH_SHORT).show()
             }
         )
     }
 
     if (showDeleteSpecificConversationDialog && conversationToDelete != null) {
-        AlertDialog(
-            onDismissRequest = {
+        ConfirmActionDialog(
+            title = stringResource(R.string.dialog_delete_convo_title),
+            message = stringResource(R.string.dialog_delete_specific_convo_msg, conversationToDelete?.title ?: ""),
+            confirmText = stringResource(R.string.dialog_delete_btn),
+            onDismiss = {
                 showDeleteSpecificConversationDialog = false
                 conversationToDelete = null
             },
-            shape = RoundedCornerShape(16.dp),
-            title = {
-                DialogBlurEffect()
-                Text(stringResource(R.string.dialog_delete_convo_title), fontWeight = FontWeight.Bold)
-            },
-            text = { Text(stringResource(R.string.dialog_delete_specific_convo_msg, conversationToDelete?.title ?: "")) },
-            confirmButton = {
-                Button(
-                    shape = RoundedCornerShape(8.dp),
-                    onClick = {
-                        conversationToDelete?.let {
-                            viewModel.deleteConversation(context, it.id)
-                        }
-                        showDeleteSpecificConversationDialog = false
-                        conversationToDelete = null
-                        Toast.makeText(context, context.getString(R.string.toast_conversation_deleted), Toast.LENGTH_SHORT).show()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue)
-                ) {
-                    Text(stringResource(R.string.dialog_delete_btn))
+            onConfirm = {
+                conversationToDelete?.let {
+                    viewModel.deleteConversation(context, it.id)
                 }
+                showDeleteSpecificConversationDialog = false
+                conversationToDelete = null
+                Toast.makeText(context, context.getString(R.string.toast_conversation_deleted), Toast.LENGTH_SHORT).show()
             }
         )
     }
 
     if (showDeleteProjectDialog && projectToDelete != null) {
-        AlertDialog(
-            onDismissRequest = {
+        ConfirmActionDialog(
+            title = stringResource(R.string.dialog_delete_project_title),
+            message = stringResource(R.string.dialog_delete_project_msg, projectToDelete?.name ?: ""),
+            confirmText = stringResource(R.string.dialog_delete_btn),
+            onDismiss = {
                 showDeleteProjectDialog = false
                 projectToDelete = null
             },
-            shape = RoundedCornerShape(16.dp),
-            title = {
-                DialogBlurEffect()
-                Text(stringResource(R.string.dialog_delete_project_title), fontWeight = FontWeight.Bold)
-            },
-            text = { Text(stringResource(R.string.dialog_delete_project_msg, projectToDelete?.name ?: "")) },
-            confirmButton = {
-                Button(
-                    shape = RoundedCornerShape(8.dp),
-                    onClick = {
-                        projectToDelete?.let {
-                            viewModel.removeProject(context, it.absolutePath)
-                        }
-                        showDeleteProjectDialog = false
-                        projectToDelete = null
-                        Toast.makeText(context, context.getString(R.string.toast_project_removed), Toast.LENGTH_SHORT).show()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue)
-                ) {
-                    Text(stringResource(R.string.dialog_delete_btn))
+            onConfirm = {
+                projectToDelete?.let {
+                    viewModel.removeProject(context, it.absolutePath)
                 }
+                showDeleteProjectDialog = false
+                projectToDelete = null
+                Toast.makeText(context, context.getString(R.string.toast_project_removed), Toast.LENGTH_SHORT).show()
             }
         )
     }
@@ -1958,29 +1960,14 @@ fun ChatScreen(
     if (showCoreUpdateConfirmDialog && currentCoreState.isUpdateAvailable) {
         val latestVer = currentCoreState.latestVersion ?: ""
         val currentVer = currentCoreState.currentVersion
-        AlertDialog(
-            onDismissRequest = {
+        ConfirmActionDialog(
+            title = stringResource(R.string.dialog_core_update_title),
+            message = stringResource(R.string.dialog_core_update_msg, latestVer, currentVer),
+            confirmText = stringResource(R.string.core_update_btn_update),
+            onDismiss = { showCoreUpdateConfirmDialog = false },
+            onConfirm = {
                 showCoreUpdateConfirmDialog = false
-            },
-            shape = RoundedCornerShape(16.dp),
-            title = {
-                DialogBlurEffect()
-                Text(stringResource(R.string.dialog_core_update_title), fontWeight = FontWeight.Bold)
-            },
-            text = {
-                Text(stringResource(R.string.dialog_core_update_msg, latestVer, currentVer))
-            },
-            confirmButton = {
-                Button(
-                    shape = RoundedCornerShape(8.dp),
-                    onClick = {
-                        showCoreUpdateConfirmDialog = false
-                        viewModel.applyCoreEngineUpdate(context)
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = AntigravityBlue)
-                ) {
-                    Text(stringResource(R.string.core_update_btn_update))
-                }
+                viewModel.applyCoreEngineUpdate(context)
             }
         )
     }
@@ -2043,51 +2030,6 @@ fun ChatScreen(
             viewModel = viewModel,
             onDismiss = { showPluginsDialog = false }
         )
-    }
-}
-
-@Composable
-fun SidePanelIcon(
-    tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
-    modifier: Modifier = Modifier.size(20.dp)
-) {
-    androidx.compose.foundation.Canvas(modifier = modifier) {
-        val strokeWidth = 1.8.dp.toPx()
-        val cornerRadius = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx(), 3.dp.toPx())
-        val padding = 2.dp.toPx()
-        val w = size.width - (padding * 2)
-        val h = size.height - (padding * 2)
-
-        drawRoundRect(
-            color = tint,
-            topLeft = androidx.compose.ui.geometry.Offset(padding, padding),
-            size = androidx.compose.ui.geometry.Size(w, h),
-            cornerRadius = cornerRadius,
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = strokeWidth)
-        )
-
-        val splitX = padding + (w * 0.65f)
-        drawLine(
-            color = tint,
-            start = androidx.compose.ui.geometry.Offset(splitX, padding),
-            end = androidx.compose.ui.geometry.Offset(splitX, padding + h),
-            strokeWidth = strokeWidth
-        )
-    }
-}
-
-private fun formatRelativeTime(timestamp: Long): String {
-    val now = System.currentTimeMillis()
-    val diff = (now - timestamp).coerceAtLeast(0)
-    val minutes = diff / (60 * 1000)
-    val hours = diff / (60 * 60 * 1000)
-    val days = diff / (24 * 60 * 60 * 1000)
-
-    return when {
-        minutes < 1 -> "just now"
-        minutes < 60 -> "${minutes}m"
-        hours < 24 -> "${hours}h"
-        else -> "${days}d"
     }
 }
 

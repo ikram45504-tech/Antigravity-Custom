@@ -72,6 +72,58 @@ object GitHubAuthManager {
         }
     }
 
+    private fun applyOwnerOnlyPermissions(file: File) {
+        file.setReadable(false, false)
+        file.setReadable(true, true)
+        file.setWritable(false, false)
+        file.setWritable(true, true)
+        try { Os.chmod(file.absolutePath, 384) } catch (_: Exception) {}
+    }
+
+    internal fun cleanGitConfigLines(lines: List<String>, removeCredentialHelper: Boolean = false): List<String> {
+        val cleaned = mutableListOf<String>()
+        var skipNextInsteadOf = false
+        var skipNextCredentialHelper = false
+        for (line in lines) {
+            val trimmed = line.trim()
+            if (trimmed.startsWith("[url \"https://") && trimmed.contains("@github.com/\"]")) {
+                skipNextInsteadOf = true
+                skipNextCredentialHelper = false
+                continue
+            }
+            if (skipNextInsteadOf && trimmed.startsWith("insteadOf")) {
+                skipNextInsteadOf = false
+                continue
+            }
+            skipNextInsteadOf = false
+
+            if (removeCredentialHelper && trimmed == "[credential \"https://github.com\"]") {
+                skipNextCredentialHelper = true
+                continue
+            }
+            if (skipNextCredentialHelper && trimmed.startsWith("helper")) {
+                skipNextCredentialHelper = false
+                continue
+            }
+            skipNextCredentialHelper = false
+            cleaned.add(line)
+        }
+        return cleaned
+    }
+
+    internal fun buildSyncedGitConfig(existingLines: List<String>, name: String, email: String): String {
+        val cleaned = cleanGitConfigLines(existingLines, removeCredentialHelper = false)
+        val sb = StringBuilder(cleaned.joinToString("\n"))
+        if (sb.isNotEmpty() && !sb.endsWith("\n")) sb.append("\n")
+        if (!sb.contains("[credential \"https://github.com\"]")) {
+            sb.append("[credential \"https://github.com\"]\n\thelper = store\n")
+        }
+        if (!sb.contains("[user]")) {
+            sb.append("[user]\n\tname = $name\n\temail = $email\n")
+        }
+        return sb.toString()
+    }
+
     fun saveAccount(context: Context, account: GitHubAccount) {
         synchronized(lock) {
             val file = getStoreFile(context)
@@ -84,7 +136,7 @@ object GitHubAuthManager {
             }
             file.parentFile?.mkdirs()
             file.writeText(obj.toString(2), Charsets.UTF_8)
-            try { Os.chmod(file.absolutePath, 384) } catch (_: Exception) {}
+            applyOwnerOnlyPermissions(file)
         }
         syncGitCredentials(context)
     }
@@ -109,32 +161,12 @@ object GitHubAuthManager {
             }
             val newLine = "https://${account.login}:${account.accessToken}@github.com"
             credFile.writeText((existingLines + newLine).joinToString("\n") + "\n", Charsets.UTF_8)
-            try { Os.chmod(credFile.absolutePath, 384) } catch (_: Exception) {}
+            applyOwnerOnlyPermissions(credFile)
 
             val gitConfig = File(homeDir, ".gitconfig")
             val currentLines = if (gitConfig.isFile) gitConfig.readLines(Charsets.UTF_8) else emptyList()
-            val cleaned = mutableListOf<String>()
-            var skipNextInsteadOf = false
-            for (line in currentLines) {
-                if (line.trim().startsWith("[url \"https://") && line.contains("@github.com/\"]")) {
-                    skipNextInsteadOf = true
-                    continue
-                }
-                if (skipNextInsteadOf && line.trim().startsWith("insteadOf")) {
-                    skipNextInsteadOf = false
-                    continue
-                }
-                skipNextInsteadOf = false
-                cleaned.add(line)
-            }
-            val sb = StringBuilder(cleaned.joinToString("\n"))
-            if (sb.isNotEmpty() && !sb.endsWith("\n")) sb.append("\n")
-            sb.append("[url \"https://${account.login}:${account.accessToken}@github.com/\"]\n\tinsteadOf = https://github.com/\n")
-            if (!sb.contains("[user]")) {
-                sb.append("[user]\n\tname = ${account.name}\n\temail = ${account.email}\n")
-            }
-            gitConfig.writeText(sb.toString(), Charsets.UTF_8)
-            try { Os.chmod(gitConfig.absolutePath, 384) } catch (_: Exception) {}
+            gitConfig.writeText(buildSyncedGitConfig(currentLines, account.name, account.email), Charsets.UTF_8)
+            applyOwnerOnlyPermissions(gitConfig)
         } catch (e: Exception) {
             AppLogger.e(TAG, "Failed to sync git credentials: ${e.message}")
         }
@@ -151,26 +183,16 @@ object GitHubAuthManager {
                     credFile.delete()
                 } else {
                     credFile.writeText(remaining.joinToString("\n") + "\n", Charsets.UTF_8)
+                    applyOwnerOnlyPermissions(credFile)
                 }
             }
             val gitConfig = File(homeDir, ".gitconfig")
             if (gitConfig.isFile) {
                 val currentLines = gitConfig.readLines(Charsets.UTF_8)
-                val cleaned = mutableListOf<String>()
-                var skipNextInsteadOf = false
-                for (line in currentLines) {
-                    if (line.trim().startsWith("[url \"https://") && line.contains("@github.com/\"]")) {
-                        skipNextInsteadOf = true
-                        continue
-                    }
-                    if (skipNextInsteadOf && line.trim().startsWith("insteadOf")) {
-                        skipNextInsteadOf = false
-                        continue
-                    }
-                    skipNextInsteadOf = false
-                    cleaned.add(line)
-                }
-                gitConfig.writeText(cleaned.joinToString("\n") + "\n", Charsets.UTF_8)
+                val cleaned = cleanGitConfigLines(currentLines, removeCredentialHelper = true)
+                val content = if (cleaned.isEmpty()) "" else cleaned.joinToString("\n").trimEnd() + "\n"
+                gitConfig.writeText(content, Charsets.UTF_8)
+                applyOwnerOnlyPermissions(gitConfig)
             }
         } catch (e: Exception) {
             AppLogger.e(TAG, "Failed to remove git credentials: ${e.message}")
@@ -179,7 +201,7 @@ object GitHubAuthManager {
 
     fun requestDeviceCode(): Result<GitHubDeviceCode> {
         return try {
-            val body = "client_id=${enc(CLIENT_ID)}&scope=${enc("repo read:user user:email")}"
+            val body = "client_id=${enc(CLIENT_ID)}&scope=${enc("repo workflow read:user user:email")}"
             val json = postForm(DEVICE_CODE_URL, body)
             val err = json.optString("error")
             if (err.isNotBlank()) {

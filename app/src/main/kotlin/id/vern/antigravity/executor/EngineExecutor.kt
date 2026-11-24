@@ -5,6 +5,7 @@ import android.system.Os
 import id.vern.antigravity.install.BootstrapInstaller
 import id.vern.antigravity.oauth.GitHubAuthManager
 import id.vern.antigravity.oauth.OAuthManager
+import id.vern.antigravity.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
@@ -12,6 +13,8 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStreamReader
 import java.util.concurrent.ConcurrentHashMap
+
+fun String.shellQuote(): String = "'" + replace("'", "'\\''") + "'"
 
 object EngineExecutor {
 
@@ -33,6 +36,74 @@ object EngineExecutor {
         } catch (_: Exception) {
             null
         }
+    }
+
+    private fun ensureExecutable(file: File) {
+        if (file.exists() && !file.canExecute()) {
+            file.setReadable(true, false)
+            file.setExecutable(true, false)
+            try {
+                Os.chmod(file.absolutePath, 493)
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun buildBaseProcessEnv(
+        env: MutableMap<String, String>,
+        context: Context,
+        filesDir: File,
+        prefixDir: File,
+        homeDir: File,
+        tmpDir: File,
+        targetCwd: File,
+        pathEnv: String,
+        ldLibraryPath: String,
+        validGitExec: File?,
+        validGitTemplate: File,
+        certFile: File,
+        goDebug: String,
+        shellBin: String? = null,
+        requireCertExists: Boolean = false,
+        includeOpenSslConf: Boolean = false
+    ) {
+        env.remove("LD_PRELOAD")
+        env["PREFIX"] = prefixDir.absolutePath
+        env["HOME"] = homeDir.absolutePath
+        env["TMPDIR"] = tmpDir.absolutePath
+        env["PWD"] = targetCwd.absolutePath
+        env["GIT_CONFIG_NOSYSTEM"] = "1"
+        env["GIT_ATTR_NOSYSTEM"] = "1"
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        if (validGitExec != null) {
+            env["GIT_EXEC_PATH"] = validGitExec.absolutePath
+            if (!isGitPermissionsSet) {
+                validGitExec.listFiles()?.forEach { ensureExecutable(it) }
+                isGitPermissionsSet = true
+            }
+        }
+        env["GIT_TEMPLATE_DIR"] = validGitTemplate.absolutePath
+        env["PATH"] = pathEnv
+        if (shellBin != null) {
+            env["SHELL"] = shellBin
+        }
+        env["TERM"] = "xterm-256color"
+        env["LANG"] = "en_US.UTF-8"
+        env["LD_LIBRARY_PATH"] = ldLibraryPath
+        if (!requireCertExists || certFile.exists()) {
+            env["SSL_CERT_FILE"] = certFile.absolutePath
+            env["CURL_CA_BUNDLE"] = certFile.absolutePath
+            if (!requireCertExists) {
+                env["GIT_SSL_CAINFO"] = certFile.absolutePath
+            }
+        }
+        if (includeOpenSslConf) {
+            env["OPENSSL_CONF"] = File(prefixDir, "etc/tls/openssl.cnf").absolutePath
+        }
+        env["GODEBUG"] = goDebug
+        env["AGY_APPLICATION_ID"] = context.packageName
+        env["APPLICATION_ID"] = context.packageName
+        env["ANTIGRAVITY_APP_DATA_DIR"] = File(homeDir, ".gemini/antigravity-cli").apply { mkdirs() }.absolutePath
+        readGatewayToken(filesDir)?.let { env["AGY_GATEWAY_TOKEN"] = it }
     }
 
     suspend fun executeCommand(
@@ -72,24 +143,13 @@ object EngineExecutor {
             append("/system/bin")
         }
 
+        val prefixDir = File(filesDir, "usr")
         val bashFile = File(prefixBin, "bash")
-        if (bashFile.exists() && !bashFile.canExecute()) {
-            bashFile.setReadable(true, false)
-            bashFile.setExecutable(true, false)
-            try { Os.chmod(bashFile.absolutePath, 493) } catch (e: Exception) {}
-        }
+        ensureExecutable(bashFile)
         val shFile = File(prefixBin, "sh")
-        if (shFile.exists() && !shFile.canExecute()) {
-            shFile.setReadable(true, false)
-            shFile.setExecutable(true, false)
-            try { Os.chmod(shFile.absolutePath, 493) } catch (e: Exception) {}
-        }
+        ensureExecutable(shFile)
         val gitFile = File(prefixBin, "git")
-        if (gitFile.exists() && !gitFile.canExecute()) {
-            gitFile.setReadable(true, false)
-            gitFile.setExecutable(true, false)
-            try { Os.chmod(gitFile.absolutePath, 493) } catch (e: Exception) {}
-        }
+        ensureExecutable(gitFile)
 
         val bashBin = when {
             File(prefixBin, "bash").canExecute() -> File(prefixBin, "bash").absolutePath
@@ -107,44 +167,26 @@ object EngineExecutor {
             val pb = ProcessBuilder(bashBin, "-c", command)
             pb.directory(targetCwd)
 
-            val env = pb.environment()
-            env.remove("LD_PRELOAD")
             val prefixLib = File(filesDir, "usr/lib")
             val certFile = File(filesDir, "usr/etc/tls/cert.pem")
-            env["PREFIX"] = File(filesDir, "usr").absolutePath
-            env["HOME"] = homeDir.absolutePath
-            env["TMPDIR"] = tmpDir.absolutePath
-            env["PWD"] = targetCwd.absolutePath
-            env["GIT_CONFIG_NOSYSTEM"] = "1"
-            env["GIT_ATTR_NOSYSTEM"] = "1"
-            env["GIT_TERMINAL_PROMPT"] = "0"
-            if (validGitExec != null) {
-                env["GIT_EXEC_PATH"] = validGitExec.absolutePath
-                if (!isGitPermissionsSet) {
-                    validGitExec.listFiles()?.forEach { file ->
-                        file.setReadable(true, false)
-                        file.setExecutable(true, false)
-                        try { Os.chmod(file.absolutePath, 493) } catch (e: Exception) {}
-                    }
-                    isGitPermissionsSet = true
-                }
-            }
-            env["GIT_TEMPLATE_DIR"] = validGitTemplate.absolutePath
-            env["PATH"] = pathEnv
-            env["SHELL"] = bashBin
-            env["TERM"] = "xterm-256color"
-            env["LANG"] = "en_US.UTF-8"
-            val ldPaths = mutableListOf(prefixLib.absolutePath, "/system/lib64")
-            env["LD_LIBRARY_PATH"] = ldPaths.joinToString(":")
-            env["SSL_CERT_FILE"] = certFile.absolutePath
-            env["CURL_CA_BUNDLE"] = certFile.absolutePath
-            env["GIT_SSL_CAINFO"] = certFile.absolutePath
-            env["OPENSSL_CONF"] = File(filesDir, "usr/etc/tls/openssl.cnf").absolutePath
-            env["GODEBUG"] = "netdns=go"
-            env["AGY_APPLICATION_ID"] = context.packageName
-            env["APPLICATION_ID"] = context.packageName
-            env["ANTIGRAVITY_APP_DATA_DIR"] = File(homeDir, ".gemini/antigravity-cli").apply { mkdirs() }.absolutePath
-            readGatewayToken(filesDir)?.let { env["AGY_GATEWAY_TOKEN"] = it }
+            buildBaseProcessEnv(
+                env = pb.environment(),
+                context = context,
+                filesDir = filesDir,
+                prefixDir = prefixDir,
+                homeDir = homeDir,
+                tmpDir = tmpDir,
+                targetCwd = targetCwd,
+                pathEnv = pathEnv,
+                ldLibraryPath = "${prefixLib.absolutePath}:/system/lib64",
+                validGitExec = validGitExec,
+                validGitTemplate = validGitTemplate,
+                certFile = certFile,
+                goDebug = "netdns=go",
+                shellBin = bashBin,
+                requireCertExists = false,
+                includeOpenSslConf = true
+            )
 
             val process = pb.start()
 
@@ -318,42 +360,26 @@ object EngineExecutor {
 
                 val gitExecDir = File(prefixDir, "libexec/git-core")
                 val validGitExec = if (gitExecDir.exists() && gitExecDir.isDirectory) gitExecDir else null
-                if (validGitExec != null && !isGitPermissionsSet) {
-                    validGitExec.listFiles()?.forEach { file ->
-                        file.setReadable(true, false)
-                        file.setExecutable(true, false)
-                        try { Os.chmod(file.absolutePath, 493) } catch (e: Exception) {}
-                    }
-                    isGitPermissionsSet = true
-                }
                 val validGitTemplate = File(prefixDir, "share/git-core/templates").apply { mkdirs() }
-
-                val env = pb.environment()
-                env.remove("LD_PRELOAD")
-                env["PREFIX"] = prefixDir.absolutePath
-                env["HOME"] = homeDir.absolutePath
-                env["TMPDIR"] = tmpDir.absolutePath
-                env["PWD"] = targetCwd.absolutePath
-                env["GIT_CONFIG_NOSYSTEM"] = "1"
-                env["GIT_ATTR_NOSYSTEM"] = "1"
-                env["GIT_TERMINAL_PROMPT"] = "0"
-                if (validGitExec != null) env["GIT_EXEC_PATH"] = validGitExec.absolutePath
-                env["GIT_TEMPLATE_DIR"] = validGitTemplate.absolutePath
-                env["TERM"] = "xterm-256color"
-                env["LANG"] = "en_US.UTF-8"
                 val extraGitPath = if (validGitExec != null) ":${validGitExec.absolutePath}" else ""
-                env["PATH"] = "${File(prefixDir, "bin").absolutePath}:${File(engineDir, "bin").absolutePath}$extraGitPath:/system/bin"
-                val ldPaths = mutableListOf(prefixLib.absolutePath, "/system/lib64")
-                env["LD_LIBRARY_PATH"] = ldPaths.joinToString(":")
-                if (certFile.exists()) {
-                    env["SSL_CERT_FILE"] = certFile.absolutePath
-                    env["CURL_CA_BUNDLE"] = certFile.absolutePath
-                }
-                env["GODEBUG"] = "netdns=cgo"
-                env["AGY_APPLICATION_ID"] = context.packageName
-                env["APPLICATION_ID"] = context.packageName
-                env["ANTIGRAVITY_APP_DATA_DIR"] = File(homeDir, ".gemini/antigravity-cli").apply { mkdirs() }.absolutePath
-                readGatewayToken(filesDir)?.let { env["AGY_GATEWAY_TOKEN"] = it }
+                val agyPath = "${File(prefixDir, "bin").absolutePath}:${File(engineDir, "bin").absolutePath}$extraGitPath:/system/bin"
+
+                buildBaseProcessEnv(
+                    env = pb.environment(),
+                    context = context,
+                    filesDir = filesDir,
+                    prefixDir = prefixDir,
+                    homeDir = homeDir,
+                    tmpDir = tmpDir,
+                    targetCwd = targetCwd,
+                    pathEnv = agyPath,
+                    ldLibraryPath = "${prefixLib.absolutePath}:/system/lib64",
+                    validGitExec = validGitExec,
+                    validGitTemplate = validGitTemplate,
+                    certFile = certFile,
+                    goDebug = "netdns=cgo",
+                    requireCertExists = true
+                )
 
                 streamProcess(pb, executionKey, onOutputLine)
             } catch (e: Exception) {
@@ -375,40 +401,26 @@ object EngineExecutor {
                 pb.directory(targetCwd)
                 val gitExecDir = File(prefixDir, "libexec/git-core")
                 val validGitExec = if (gitExecDir.exists() && gitExecDir.isDirectory) gitExecDir else null
-                if (validGitExec != null && !isGitPermissionsSet) {
-                    validGitExec.listFiles()?.forEach { file ->
-                        file.setReadable(true, false)
-                        file.setExecutable(true, false)
-                        try { Os.chmod(file.absolutePath, 493) } catch (e: Exception) {}
-                    }
-                    isGitPermissionsSet = true
-                }
                 val validGitTemplate = File(prefixDir, "share/git-core/templates").apply { mkdirs() }
-                val env = pb.environment()
-                env.remove("LD_PRELOAD")
-                env["PREFIX"] = prefixDir.absolutePath
-                env["HOME"] = homeDir.absolutePath
-                env["TMPDIR"] = tmpDir.absolutePath
-                env["PWD"] = targetCwd.absolutePath
-                env["GIT_CONFIG_NOSYSTEM"] = "1"
-                env["GIT_ATTR_NOSYSTEM"] = "1"
-                env["GIT_TERMINAL_PROMPT"] = "0"
-                if (validGitExec != null) env["GIT_EXEC_PATH"] = validGitExec.absolutePath
-                env["GIT_TEMPLATE_DIR"] = validGitTemplate.absolutePath
                 val extraGitPath = if (validGitExec != null) ":${validGitExec.absolutePath}" else ""
-                env["PATH"] = "${File(prefixDir, "bin").absolutePath}:${File(engineDir, "bin").absolutePath}$extraGitPath:/system/bin"
-                env["TERM"] = "xterm-256color"
-                env["LANG"] = "en_US.UTF-8"
-                env["LD_LIBRARY_PATH"] = "${prefixLib.absolutePath}:/system/lib64"
-                if (certFile.exists()) {
-                    env["SSL_CERT_FILE"] = certFile.absolutePath
-                    env["CURL_CA_BUNDLE"] = certFile.absolutePath
-                }
-                env["GODEBUG"] = "netdns=cgo"
-                env["AGY_APPLICATION_ID"] = context.packageName
-                env["APPLICATION_ID"] = context.packageName
-                env["ANTIGRAVITY_APP_DATA_DIR"] = File(homeDir, ".gemini/antigravity-cli").apply { mkdirs() }.absolutePath
-                readGatewayToken(filesDir)?.let { env["AGY_GATEWAY_TOKEN"] = it }
+                val agyPath = "${File(prefixDir, "bin").absolutePath}:${File(engineDir, "bin").absolutePath}$extraGitPath:/system/bin"
+
+                buildBaseProcessEnv(
+                    env = pb.environment(),
+                    context = context,
+                    filesDir = filesDir,
+                    prefixDir = prefixDir,
+                    homeDir = homeDir,
+                    tmpDir = tmpDir,
+                    targetCwd = targetCwd,
+                    pathEnv = agyPath,
+                    ldLibraryPath = "${prefixLib.absolutePath}:/system/lib64",
+                    validGitExec = validGitExec,
+                    validGitTemplate = validGitTemplate,
+                    certFile = certFile,
+                    goDebug = "netdns=cgo",
+                    requireCertExists = true
+                )
                 streamProcess(pb, executionKey, onOutputLine)
             } catch (e: Exception) {
                 onOutputLine("Engine wrapper execution failed: ${e.message}", true)
@@ -676,7 +688,9 @@ object EngineExecutor {
                 hostsFile.setReadable(true, false)
             }
             isEnvironmentHealed = true
-        } catch (e: Exception) {}
+        } catch (e: Exception) {
+            AppLogger.e("EngineExecutor", "Failed to heal environment: ${e.message}")
+        }
     }
 
     private fun copyAssetFile(context: Context, assetPath: String, dest: File) {

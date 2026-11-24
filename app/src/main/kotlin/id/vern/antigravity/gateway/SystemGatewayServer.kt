@@ -126,18 +126,7 @@ class SystemGatewayServer(
                     String(buffer, 0, read)
                 } else ""
 
-                val endpoint = rawPath.removePrefix("/").substringBefore("?").trim()
-                val isHealthCheck = endpoint.isEmpty() || endpoint == "health"
-                val tokenValid = providedToken.isNotEmpty() && MessageDigest.isEqual(
-                    providedToken.toByteArray(Charsets.UTF_8),
-                    authToken.toByteArray(Charsets.UTF_8)
-                )
-
-                val (statusLine, responseJson) = if (!isHealthCheck && !tokenValid) {
-                    "HTTP/1.1 401 Unauthorized" to JSONObject().put("ok", false).put("error", "Unauthorized")
-                } else {
-                    "HTTP/1.1 200 OK" to dispatch(rawPath, body)
-                }
+                val (statusLine, responseJson) = routeRequest(rawPath, body, providedToken)
                 val responseBytes = responseJson.toString().toByteArray(Charsets.UTF_8)
 
                 val out = client.getOutputStream()
@@ -154,6 +143,26 @@ class SystemGatewayServer(
                 Log.w(TAG, "Gateway client handle error: ${e.message}")
             }
         }
+    }
+
+    internal fun routeRequest(rawPath: String, body: String, providedToken: String): Pair<String, JSONObject> {
+        val endpoint = rawPath.removePrefix("/").substringBefore("?").trim()
+        val isHealthCheck = endpoint.isEmpty() || endpoint == "health"
+        val tokenValid = providedToken.isNotEmpty() && MessageDigest.isEqual(
+            providedToken.toByteArray(Charsets.UTF_8),
+            authToken.toByteArray(Charsets.UTF_8)
+        )
+        return if (!isHealthCheck && !tokenValid) {
+            "HTTP/1.1 401 Unauthorized" to JSONObject().put("ok", false).put("error", "Unauthorized")
+        } else {
+            "HTTP/1.1 200 OK" to dispatch(rawPath, body)
+        }
+    }
+
+    internal fun isSupportedExternalScheme(url: String): Boolean {
+        val scheme = runCatching { java.net.URI(url).scheme?.lowercase() }.getOrNull()
+            ?: runCatching { Uri.parse(url)?.scheme?.lowercase() }.getOrNull()
+        return scheme == "http" || scheme == "https"
     }
 
     private fun dispatch(path: String, body: String): JSONObject {
@@ -176,16 +185,17 @@ class SystemGatewayServer(
             }
             "open_url" -> {
                 val url = json.optString("url").trim()
-                val parsed = if (url.isNotBlank()) runCatching { Uri.parse(url) }.getOrNull() else null
-                val scheme = parsed?.scheme?.lowercase()
-                if (parsed != null && (scheme == "http" || scheme == "https")) {
-                    mainHandler.post {
-                        try {
-                            val intent = Intent(Intent.ACTION_VIEW, parsed).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            context.startActivity(intent)
-                        } catch (e: Exception) {}
+                if (url.isNotBlank() && isSupportedExternalScheme(url)) {
+                    val parsed = runCatching { Uri.parse(url) }.getOrNull()
+                    if (parsed != null) {
+                        mainHandler.post {
+                            try {
+                                val intent = Intent(Intent.ACTION_VIEW, parsed).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(intent)
+                            } catch (e: Exception) {}
+                        }
                     }
                     result.put("opened", url)
                 } else if (url.isNotBlank()) {

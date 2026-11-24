@@ -108,6 +108,9 @@ object CoreUpdateManager {
         updateInfo: CoreUpdateInfo,
         onProgress: (Float, String) -> Unit
     ): Result<String> {
+        if (updateInfo.url.isBlank()) {
+            return Result.failure(IllegalArgumentException("Core engine download URL is blank"))
+        }
         val engineDir = BootstrapInstaller.engineDir(context)
         val agyBin = File(engineDir, "bin/agy")
         val ldBin = File(engineDir, "glibc/lib/ld-linux-aarch64.so.1")

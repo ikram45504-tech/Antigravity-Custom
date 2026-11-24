@@ -3,6 +3,7 @@ package id.vern.antigravity.oauth
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.system.Os
 import android.util.Base64
 import android.util.Log
 import id.vern.antigravity.util.AppLogger
@@ -153,6 +154,16 @@ migrations:  {
         return result
     }
 
+    private fun applyOwnerOnlyPermissions(file: File) {
+        file.setReadable(false, false)
+        file.setReadable(true, true)
+        file.setWritable(false, false)
+        file.setWritable(true, true)
+        try {
+            Os.chmod(file.absolutePath, 384)
+        } catch (_: Exception) {}
+    }
+
     fun checkAndImportExistingToken(context: Context, force: Boolean = false) {
         val now = System.currentTimeMillis()
         if (!force && now - lastTokenCheckTimeMs < 10_000L) {
@@ -177,8 +188,7 @@ migrations:  {
                             if (needsUpdate) {
                                 target.parentFile?.mkdirs()
                                 target.writeText(content, Charsets.UTF_8)
-                                target.setReadable(true, false)
-                                target.setWritable(true, false)
+                                applyOwnerOnlyPermissions(target)
                             }
                         } catch (e: Exception) {}
                     }
@@ -328,10 +338,8 @@ migrations:  {
             if (!idToken.isNullOrBlank()) {
                 val parts = idToken.split(".")
                 if (parts.size >= 2) {
-                    val payloadStr = String(
-                        Base64.decode(parts[1], Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING),
-                        StandardCharsets.UTF_8
-                    )
+                    val decodedBytes = java.util.Base64.getUrlDecoder().decode(parts[1])
+                    val payloadStr = String(decodedBytes, StandardCharsets.UTF_8)
                     val jwt = JSONObject(payloadStr)
                     email = jwt.optString("email").takeIf { it.isNotBlank() }
                     name = jwt.optString("name").takeIf { it.isNotBlank() }
@@ -424,7 +432,7 @@ migrations:  {
                     }
                     if (changed) {
                         target.writeText(json.toString(2), Charsets.UTF_8)
-                        target.setReadable(true, false)
+                        applyOwnerOnlyPermissions(target)
                     }
                 } catch (e: Exception) {}
             }
@@ -506,8 +514,7 @@ migrations:  {
             try {
                 target.parentFile?.mkdirs()
                 target.writeText(tokenJson, Charsets.UTF_8)
-                target.setReadable(true, false)
-                target.setWritable(true, false)
+                applyOwnerOnlyPermissions(target)
             } catch (e: Exception) {}
         }
         syncCompanionStateFiles(context)
@@ -541,8 +548,7 @@ migrations:  {
             try {
                 target.parentFile?.mkdirs()
                 target.writeText(finalJsonStr, Charsets.UTF_8)
-                target.setReadable(true, false)
-                target.setWritable(true, false)
+                applyOwnerOnlyPermissions(target)
             } catch (e: Exception) {}
         }
         syncCompanionStateFiles(context)

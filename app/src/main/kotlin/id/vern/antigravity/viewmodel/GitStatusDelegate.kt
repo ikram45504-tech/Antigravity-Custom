@@ -3,6 +3,7 @@ package id.vern.antigravity.viewmodel
 import android.content.Context
 import id.vern.antigravity.data.ChangedFileItem
 import id.vern.antigravity.executor.EngineExecutor
+import id.vern.antigravity.executor.shellQuote
 import id.vern.antigravity.util.NetworkDownloader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,7 +28,7 @@ class GitStatusDelegate {
         if (rootDir != null && rootDir.exists() && rootDir.isDirectory && File(rootDir, ".git").exists()) {
             try {
                 val porcelainRegex = Regex("""^[ MADRCU?!]{1,2}\s+(.+)$""")
-                EngineExecutor.executeCommand(context, "cd '${rootDir.absolutePath}' && git status --porcelain 2>/dev/null") { line, _ ->
+                EngineExecutor.executeCommand(context, "git status --porcelain 2>/dev/null", workingDir = rootDir) { line, _ ->
                     val trimmed = line.trim()
                     val match = porcelainRegex.find(trimmed)
                     if (match != null) {
@@ -56,7 +57,11 @@ class GitStatusDelegate {
         }
         val diffBuilder = StringBuilder()
         try {
-            EngineExecutor.executeCommand(context, "cd '${root.absolutePath}' && git diff HEAD -- '$relativePath' 2>/dev/null") { line, _ ->
+            EngineExecutor.executeCommand(
+                context,
+                "git diff HEAD -- ${relativePath.shellQuote()} 2>/dev/null",
+                workingDir = root
+            ) { line, _ ->
                 diffBuilder.append(line).append("\n")
             }
         } catch (_: Exception) {}

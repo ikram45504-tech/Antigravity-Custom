@@ -7,6 +7,7 @@ import android.os.Process
 import android.os.StrictMode
 import android.util.Log
 import id.vern.antigravity.ui.CrashHandlerActivity
+import id.vern.antigravity.util.AppLogger
 import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
@@ -26,6 +27,7 @@ class AntigravityApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        AppLogger.init(applicationContext)
         if (BuildConfig.DEBUG) {
             StrictMode.setThreadPolicy(
                 StrictMode.ThreadPolicy.Builder()

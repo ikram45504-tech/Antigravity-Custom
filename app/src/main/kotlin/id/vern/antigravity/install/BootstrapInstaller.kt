@@ -271,6 +271,9 @@ object BootstrapInstaller {
 
     private fun installCoreEngine(context: Context, onProgress: (String, Float) -> Unit) {
         val info = CoreUpdateManager.checkForUpdate(context)
+        if (info.url.isBlank()) {
+            throw IllegalStateException("Failed to fetch core engine manifest from ${CoreUpdateManager.MANIFEST_URL}")
+        }
         val result = CoreUpdateManager.downloadAndApply(context, info) { p, msg -> onProgress(msg, p) }
         if (result.isFailure) {
             throw IllegalStateException(result.exceptionOrNull()?.message ?: "Core engine download failed")
@@ -288,20 +291,29 @@ object BootstrapInstaller {
         }
     }
 
-    private fun extractZipStream(stream: InputStream, targetDir: File) {
+    internal fun isSafeZipDestination(targetDir: File, entryName: String): Boolean {
         val targetCanonical = targetDir.canonicalPath
+        val targetPrefix = if (targetCanonical.endsWith(File.separator)) {
+            targetCanonical
+        } else {
+            "$targetCanonical${File.separator}"
+        }
+        val destCanonical = File(targetDir, entryName).canonicalPath
+        return destCanonical == targetCanonical || destCanonical.startsWith(targetPrefix)
+    }
+
+    private fun extractZipStream(stream: InputStream, targetDir: File) {
         val buffer = ByteArray(65536)
 
         ZipInputStream(stream.buffered()).use { zis ->
             var entry: ZipEntry? = zis.nextEntry
             while (entry != null) {
                 val entryName = entry.name
-                val destFile = File(targetDir, entryName)
-                val destCanonical = destFile.canonicalPath
-                if (!destCanonical.startsWith(targetCanonical)) {
+                if (!isSafeZipDestination(targetDir, entryName)) {
                     entry = zis.nextEntry
                     continue
                 }
+                val destFile = File(targetDir, entryName)
 
                 if (entry.isDirectory) {
                     destFile.mkdirs()

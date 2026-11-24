@@ -118,7 +118,7 @@ def run_task_worker(task):
     log(f"Worker started for task [{name}] (ID: {task_id})")
 
     if not command and prompt:
-        command = f"agy-notify post -t 'AI Task Trigger' -m '{prompt[:100]}'"
+        command = f"agy-notify post -t 'AI Task Trigger' -m {shlex.quote(prompt[:100])}"
 
     notify("Antigravity Daemon", f"Running task: {name}", tag=f"task_{task_id}")
 
