@@ -62,8 +62,12 @@ android {
         // The bundled Linux userspace needs the glibc bootstrap, exec of
         // extracted binaries, and MANAGE_EXTERNAL_STORAGE behaviour; none of
         // that is viable below Android 11. Keep this in sync with README.md.
+        // minSdk moves in lockstep with the README's Android 11+ requirement.
+        // targetSdk is deliberately kept in step with compileSdk rather than
+        // lowered: Play requires a recent targetSdk, and a targetSdk *below*
+        // minSdk is rejected by AGP outright.
         minSdk = 30
-        targetSdk = 28
+        targetSdk = 36
         versionCode = 7
         versionName = "1.0.6"
 

@@ -2,7 +2,14 @@ val isWindows = System.getProperty("os.name").lowercase().contains("win")
 val rootDirFile = rootDir
 val localPropsFile = java.io.File(rootDirFile, "local.properties")
 
-if (localPropsFile.exists()) {
+// Resolve the SDK from the environment first: this is what CI sets, and it
+// avoids rewriting a valid local.properties on developer machines.
+val envSdk = System.getenv("ANDROID_HOME")?.takeIf { it.isNotBlank() && java.io.File(it).exists() }
+    ?: System.getenv("ANDROID_SDK_ROOT")?.takeIf { it.isNotBlank() && java.io.File(it).exists() }
+
+if (envSdk != null) {
+  // Nothing to do: Gradle and AGP both read ANDROID_HOME directly.
+} else if (localPropsFile.exists()) {
   val props = java.util.Properties().apply {
     localPropsFile.inputStream().use { load(it) }
   }
@@ -10,41 +17,43 @@ if (localPropsFile.exists()) {
 
   if (isWindows) {
     if (currentSdk.isNullOrBlank() || !java.io.File(currentSdk).exists() || !currentSdk.contains(":")) {
-      props.setProperty("sdk.dir", "C:\\Users\\gemar\\AppData\\Local\\Android\\Sdk")
-      localPropsFile.outputStream().use { props.store(it, "Auto-configured for Windows") }
+      val foundSdk = listOfNotNull(
+        System.getenv("LOCALAPPDATA")?.let { "$it\Android\Sdk" },
+        "${System.getProperty("user.home")}\AppData\Local\Android\Sdk"
+      ).firstOrNull { java.io.File(it).exists() }
+      if (foundSdk != null) {
+        props.setProperty("sdk.dir", foundSdk)
+        localPropsFile.outputStream().use { props.store(it, "Auto-configured for Windows") }
+      }
     }
   } else {
     if (currentSdk.isNullOrBlank() || currentSdk.contains(":") || !java.io.File(currentSdk).exists()) {
       val androidSdkCandidates = listOfNotNull(
-        System.getenv("ANDROID_HOME"),
-        System.getenv("ANDROID_SDK_ROOT"),
-        "/data/user/0/com.agy/files/android-sdk",
-        "/data/user/0/id.vern.antigravity/files/android-sdk",
+        "${System.getProperty("user.home")}/Android/Sdk",
         "${System.getProperty("user.home")}/android-sdk",
-        "/storage/emulated/0/Android/sdk",
-        "/storage/emulated/0/android-sdk",
-        "/data/data/com.itsaky.androidide/files/usr/android-sdk",
+        "/usr/local/lib/android/sdk",
+        "/opt/android-sdk",
+        // On-device build environments (Termux / AndroidIDE).
         "/data/data/com.termux/files/home/android-sdk",
-        "/data/data/com.termux/files/usr/lib/android-sdk"
+        "/data/data/com.termux/files/usr/lib/android-sdk",
+        "/data/data/com.itsaky.androidide/files/usr/android-sdk"
       )
       val foundSdk = androidSdkCandidates.firstOrNull { java.io.File(it).exists() }
       if (foundSdk != null) {
         props.setProperty("sdk.dir", foundSdk)
-        localPropsFile.outputStream().use { props.store(it, "Auto-configured for Android/Termux/ACSIDE") }
+        localPropsFile.outputStream().use { props.store(it, "Auto-configured for Android/Termux/AndroidIDE") }
       } else {
         props.remove("sdk.dir")
-        localPropsFile.outputStream().use { props.store(it, "Auto-cleared invalid Windows path for ACSIDE/Android environment") }
+        localPropsFile.outputStream().use { props.store(it, "Cleared stale sdk.dir") }
       }
     }
   }
-} else if (isWindows) {
-  val props = java.util.Properties().apply {
-    setProperty("sdk.dir", "C:\\Users\\gemar\\AppData\\Local\\Android\\Sdk")
-  }
-  localPropsFile.outputStream().use { props.store(it, "Auto-generated for Windows") }
 }
+// When local.properties is absent and no SDK is discoverable we deliberately do
+// not create a file with a bogus path: let AGP report the real problem.
 
 val agyDir = java.io.File("/data/user/0/com.agy/files")
+// Only applied on-device; harmless elsewhere because the directory is absent.
 if (agyDir.exists()) {
   val tmpDir = java.io.File(agyDir, "tmp").apply { mkdirs() }
   if (System.getProperty("java.io.tmpdir").isNullOrBlank() || System.getProperty("java.io.tmpdir") == "/tmp") {
