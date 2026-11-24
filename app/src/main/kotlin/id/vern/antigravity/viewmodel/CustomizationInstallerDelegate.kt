@@ -153,7 +153,7 @@ class CustomizationInstallerDelegate {
         val tmpCloneDir = File(context.cacheDir, "skill-clone-${skillItem.id}").absolutePath
         val gitEnvSetup = CustomizationTracker.prepareGitEnv(context)
         val (cleanUrl, extractedSub) = normalizeGitRepoUrl(skillItem.repoUrl)
-        val effectiveSubPath = skillItem.subPath?.ifBlank { null } ?: extractedSub
+        val effectiveSubPath = sanitizeSubPath(skillItem.subPath?.ifBlank { null } ?: extractedSub)
 
         val cmd = buildString {
             append(gitEnvSetup)
@@ -277,7 +277,7 @@ class CustomizationInstallerDelegate {
         val tmpDir = File(context.cacheDir, "plugin-clone-${pluginItem.id}").absolutePath
         val gitEnvSetup = CustomizationTracker.prepareGitEnv(context)
         val (cleanUrl, extractedSub) = normalizeGitRepoUrl(pluginItem.repoUrl)
-        val effectiveSubPath = pluginItem.subPath?.ifBlank { null } ?: extractedSub
+        val effectiveSubPath = sanitizeSubPath(pluginItem.subPath?.ifBlank { null } ?: extractedSub)
 
         val rawCmd = when (pluginItem.id.lowercase()) {
             "rtk" -> {
@@ -420,6 +420,10 @@ class CustomizationInstallerDelegate {
 
         val typeLabel = if (track.isPlugin) "Plugin" else "Skill"
         val tmpCloneDir = File(context.cacheDir, "update-${track.id}").absolutePath
+        // These values come from persisted tracking records and are
+        // interpolated into a `git clone '...'` command string.
+        val trackedRepoUrl = CustomizationTracker.sanitizeRepoUrl(track.repoUrl)
+        val trackedSubPath = CustomizationTracker.sanitizeSubPath(track.subPath)
         val gitEnvSetup = CustomizationTracker.prepareGitEnv(context)
 
         val usrRtkPath = File(context.filesDir, "usr/bin/rtk").absolutePath
@@ -428,10 +432,10 @@ class CustomizationInstallerDelegate {
             "echo '[RTK] Updating RTK configuration...' && if [ ! -f '$usrRtkPath' ]; then echo '[RTK] Downloading RTK binary from release payload...' && curl -sSL --retry 3 -o '$usrRtkPath' '$rtkDownloadUrl'; fi && chmod +x '$usrRtkPath' 2>/dev/null && rtk init --agent antigravity --global --auto-patch 2>&1 && cp -r '$targetDir'/* '$homeTargetDir/' 2>/dev/null; agy-fix-paths '$targetDir' 2>/dev/null || true; echo \"[RTK plugin successfully updated: $(rtk --version 2>&1)]\""
         } else if (track.isPlugin && File(targetDir, ".git").exists()) {
             "cd '$targetDir' && git pull && cp -r '$targetDir'/* '$homeTargetDir/' 2>/dev/null; agy-fix-paths '$targetDir' 2>/dev/null || true; echo '[$typeLabel ${track.name} successfully updated!]'"
-        } else if (!track.subPath.isNullOrBlank()) {
-            "rm -rf '$tmpCloneDir' && mkdir -p '$targetDir' '$homeTargetDir' && git clone --depth 1 '${track.repoUrl}' '$tmpCloneDir' && cp -r '$tmpCloneDir/${track.subPath.trim('/')}'/* '$targetDir/' 2>/dev/null; cp -r '$targetDir'/* '$homeTargetDir/' 2>/dev/null; rm -rf '$tmpCloneDir'; agy-fix-paths '$targetDir' 2>/dev/null || true; echo '[$typeLabel ${track.name} successfully updated!]'"
+        } else if (!trackedSubPath.isNullOrBlank()) {
+            "rm -rf '$tmpCloneDir' && mkdir -p '$targetDir' '$homeTargetDir' && git clone --depth 1 '$trackedRepoUrl' '$tmpCloneDir' && cp -r '$tmpCloneDir/$trackedSubPath'/* '$targetDir/' 2>/dev/null; cp -r '$targetDir'/* '$homeTargetDir/' 2>/dev/null; rm -rf '$tmpCloneDir'; agy-fix-paths '$targetDir' 2>/dev/null || true; echo '[$typeLabel ${track.name} successfully updated!]'"
         } else {
-            "rm -rf '$tmpCloneDir' && mkdir -p '$targetDir' '$homeTargetDir' && git clone --depth 1 '${track.repoUrl}' '$tmpCloneDir' && cp -r '$tmpCloneDir'/* '$targetDir/' 2>/dev/null; cp -r '$targetDir'/* '$homeTargetDir/' 2>/dev/null; rm -rf '$tmpCloneDir'; agy-fix-paths '$targetDir' 2>/dev/null || true; echo '[$typeLabel ${track.name} successfully updated!]'"
+            "rm -rf '$tmpCloneDir' && mkdir -p '$targetDir' '$homeTargetDir' && git clone --depth 1 '$trackedRepoUrl' '$tmpCloneDir' && cp -r '$tmpCloneDir'/* '$targetDir/' 2>/dev/null; cp -r '$targetDir'/* '$homeTargetDir/' 2>/dev/null; rm -rf '$tmpCloneDir'; agy-fix-paths '$targetDir' 2>/dev/null || true; echo '[$typeLabel ${track.name} successfully updated!]'"
         }
         val cmd = gitEnvSetup + rawCmd
 
@@ -512,7 +516,13 @@ class CustomizationInstallerDelegate {
         refreshPlugins: (Context) -> Unit
     ) {
         val (cleanUrl, extractedSub) = normalizeGitRepoUrl(rawRepoUrl)
-        val effectiveSubPath = subPath?.ifBlank { null } ?: extractedSub
+        // normalizeGitRepoUrl returns an empty URL when the input contains
+        // shell metacharacters, so bail out instead of running `git clone ''`.
+        if (cleanUrl.isBlank()) {
+            repoInspectionError.value = "Invalid repository URL"
+            return
+        }
+        val effectiveSubPath = sanitizeSubPath(subPath?.ifBlank { null } ?: extractedSub)
         val safeName = if (customName.isNotBlank()) {
             customName.trim().lowercase().replace(" ", "-").replace(Regex("[^a-z0-9_-]"), "")
         } else {

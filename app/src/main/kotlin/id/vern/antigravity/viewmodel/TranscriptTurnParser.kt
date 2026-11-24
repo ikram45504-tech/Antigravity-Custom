@@ -13,7 +13,6 @@ import java.io.RandomAccessFile
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 
 data class ParsedTranscriptTurn(
     val thinking: String? = null,
@@ -22,11 +21,38 @@ data class ParsedTranscriptTurn(
 )
 
 object TranscriptTurnParser {
-    val transcriptFileCache = ConcurrentHashMap<String, File>()
+
+    /**
+     * Bounded cache of conversation id -> transcript file.
+     *
+     * Previously an unbounded `ConcurrentHashMap` that lived for the whole
+     * process and was never evicted. A fixed-capacity LRU keeps the hot path
+     * fast while preventing a long session (many subagents, many restarts) from
+     * retaining a File per conversation forever.
+     */
+    private const val MAX_CACHED_TRANSCRIPTS = 64
+
+    val transcriptFileCache: MutableMap<String, File> = object : LinkedHashMap<String, File>(
+        /* initialCapacity = */ MAX_CACHED_TRANSCRIPTS,
+        /* loadFactor = */ 0.75f,
+        /* accessOrder = */ true
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, File>?): Boolean =
+            size > MAX_CACHED_TRANSCRIPTS
+    }
+
+    /** Accessors are synchronised because the backing map is not concurrent. */
+    private fun cacheLookup(cliConvId: String): File? {
+        synchronized(transcriptFileCache) { return transcriptFileCache[cliConvId] }
+    }
+
+    private fun cachePut(cliConvId: String, file: File) {
+        synchronized(transcriptFileCache) { transcriptFileCache[cliConvId] = file }
+    }
 
     fun findActiveTranscriptFile(context: Context, cliConvId: String?): File? {
         if (!cliConvId.isNullOrBlank()) {
-            transcriptFileCache[cliConvId]?.let { cached ->
+            cacheLookup(cliConvId)?.let { cached ->
                 if (cached.exists() && cached.isFile && cached.length() > 0) return cached
             }
         }
@@ -52,7 +78,7 @@ object TranscriptTurnParser {
             for (baseDir in candidateBaseDirs) {
                 val f = File(baseDir, "$cliConvId/.system_generated/logs/transcript.jsonl")
                 if (f.exists() && f.isFile && f.length() > 0) {
-                    transcriptFileCache[cliConvId] = f
+                    cachePut(cliConvId, f)
                     return f
                 }
             }
@@ -76,9 +102,10 @@ object TranscriptTurnParser {
                 }
             }
         }
-        if (newestFile != null && !cliConvId.isNullOrBlank()) {
-            transcriptFileCache[cliConvId] = newestFile
-        }
+        // Deliberately NOT cached: this is the "most recently modified transcript
+        // on disk" fallback, not a transcript belonging to cliConvId. Caching it
+        // bound unknown conversations to an unrelated transcript, so their
+        // messages could be attributed to the wrong thread.
         return newestFile
     }
 

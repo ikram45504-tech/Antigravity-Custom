@@ -4,6 +4,7 @@ import android.content.Context
 import android.system.Os
 import android.util.Log
 import id.vern.antigravity.util.NetworkDownloader
+import id.vern.antigravity.util.VersionComparator
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
@@ -87,19 +88,13 @@ object CoreUpdateManager {
         )
     }
 
-    fun isVersionNewer(remote: String, current: String): Boolean {
-        if (remote == current) return false
-        val rParts = remote.split(".").mapNotNull { it.toIntOrNull() }
-        val cParts = current.split(".").mapNotNull { it.toIntOrNull() }
-        val maxLen = maxOf(rParts.size, cParts.size)
-        for (i in 0 until maxLen) {
-            val r = rParts.getOrElse(i) { 0 }
-            val c = cParts.getOrElse(i) { 0 }
-            if (r > c) return true
-            if (r < c) return false
-        }
-        return false
-    }
+    /**
+     * Retained for callers, but now backed by the shared [VersionComparator] so
+     * the app-update and core-engine-update paths can never disagree about
+     * which version is newer.
+     */
+    fun isVersionNewer(remote: String, current: String): Boolean =
+        VersionComparator.isNewer(remote, current)
 
     fun downloadAndApply(
         context: Context,

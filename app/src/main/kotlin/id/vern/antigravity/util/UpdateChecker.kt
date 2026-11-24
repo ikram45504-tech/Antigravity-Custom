@@ -288,24 +288,11 @@ class UpdateChecker(private val context: Context) {
         }
     }
 
-    private fun isNewerVersion(currentVersion: String, remoteVersion: String): Boolean {
-        try {
-            val cleanCurrent = currentVersion.lowercase().replace("v", "")
-            val cleanRemote = remoteVersion.lowercase().replace("v", "")
-            val currentParts = cleanCurrent.split(".")
-            val remoteParts = cleanRemote.split(".")
-            val maxLength = maxOf(currentParts.size, remoteParts.size)
-            for (i in 0 until maxLength) {
-                val currentPart = if (i < currentParts.size) currentParts[i].toIntOrNull() ?: 0 else 0
-                val remotePart = if (i < remoteParts.size) remoteParts[i].toIntOrNull() ?: 0 else 0
-                if (remotePart > currentPart) return true
-                else if (remotePart < currentPart) return false
-            }
-            return false
-        } catch (e: Exception) {
-            return remoteVersion.replace("v", "") > currentVersion.replace("v", "")
-        }
-    }
+    // Delegates to the shared comparator; see VersionComparator for why the
+    // previous local implementation mis-parsed "dev1.2" and ordered "1.0.10"
+    // before "1.0.9".
+    private fun isNewerVersion(currentVersion: String, remoteVersion: String): Boolean =
+        VersionComparator.isNewer(remoteVersion, currentVersion)
 
     suspend fun trackDownloadProgress(downloadId: Long, onState: (AppUpdateState) -> Unit) {
         val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
