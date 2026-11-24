@@ -57,6 +57,7 @@ import id.vern.antigravity.service.McpServerItem
 import id.vern.antigravity.service.WakeLockHolder
 import id.vern.antigravity.service.TerminalLine
 import id.vern.antigravity.service.TerminalSessionManager
+import id.vern.antigravity.service.PromptCompletionNotifier
 import id.vern.antigravity.executor.EngineExecutor
 import id.vern.antigravity.install.BootstrapInstaller
 import id.vern.antigravity.install.CoreUpdateManager
@@ -196,6 +197,11 @@ class AntigravityViewModel : ViewModel() {
         const val KEY_PLAN_REVIEW_POLICY = "ag_plan_review_policy"
         const val KEY_BROWSER_JS_POLICY = "ag_browser_js_policy"
         const val KEY_ENABLE_CREDIT_OVERAGES = "ag_enable_credit_overages"
+        const val KEY_COMPLETION_NOTIFICATION_ENABLED = "ag_completion_notification_enabled"
+        const val KEY_COMPLETION_BUZZ_TYPE = "ag_completion_buzz_type"
+        const val KEY_COMPLETION_SOUND_TYPE = "ag_completion_sound_type"
+        const val KEY_COMPLETION_CUSTOM_SOUND_URI = "ag_completion_custom_sound_uri"
+        const val KEY_COMPLETION_CUSTOM_SOUND_TITLE = "ag_completion_custom_sound_title"
         const val KEY_USER_PROJECTS = "ag_user_projects"
         const val KEY_CONVERSATION_HISTORY = "ag_conversation_history"
         const val KEY_LAST_ACTIVE_CONV_ID = "ag_last_active_conv_id"
@@ -238,6 +244,11 @@ class AntigravityViewModel : ViewModel() {
     val planReviewPolicy: StateFlow<String> = settingsPreferencesDelegate.planReviewPolicy
     val browserJsPolicy: StateFlow<String> = settingsPreferencesDelegate.browserJsPolicy
     val enableCreditOverages: StateFlow<Boolean> = settingsPreferencesDelegate.enableCreditOverages
+    val completionNotificationEnabled: StateFlow<Boolean> = settingsPreferencesDelegate.completionNotificationEnabled
+    val completionBuzzType: StateFlow<String> = settingsPreferencesDelegate.completionBuzzType
+    val completionSoundType: StateFlow<String> = settingsPreferencesDelegate.completionSoundType
+    val completionCustomSoundUri: StateFlow<String?> = settingsPreferencesDelegate.completionCustomSoundUri
+    val completionCustomSoundTitle: StateFlow<String> = settingsPreferencesDelegate.completionCustomSoundTitle
     val permissionState: StateFlow<PermissionGrantsState> = settingsPreferencesDelegate.permissionState
     val installedRulesList: StateFlow<List<RuleItem>> = settingsPreferencesDelegate.installedRulesList
     val mcpServers: StateFlow<List<McpServerItem>> = settingsPreferencesDelegate.mcpServers
@@ -597,6 +608,29 @@ class AntigravityViewModel : ViewModel() {
 
     fun setEnableCreditOverages(context: Context, enabled: Boolean) =
         settingsPreferencesDelegate.setEnableCreditOverages(context, enabled, ::addLog)
+
+    fun setCompletionNotificationEnabled(context: Context, enabled: Boolean) =
+        settingsPreferencesDelegate.setCompletionNotificationEnabled(context, enabled, ::addLog)
+
+    fun setCompletionBuzzType(context: Context, buzzType: String) =
+        settingsPreferencesDelegate.setCompletionBuzzType(context, buzzType, ::addLog)
+
+    fun setCompletionSoundType(context: Context, soundType: String) =
+        settingsPreferencesDelegate.setCompletionSoundType(context, soundType, ::addLog)
+
+    fun setCompletionCustomSound(context: Context, uri: String?, title: String) =
+        settingsPreferencesDelegate.setCompletionCustomSound(context, uri, title, ::addLog)
+
+    fun testPromptCompletionAlert(context: Context) {
+        id.vern.antigravity.service.PromptCompletionNotifier.notifyPromptCompleted(
+            context = context,
+            conversationId = activeConversationId.value ?: "test",
+            prompt = "Test prompt execution",
+            response = "Antigravity prompt completed successfully! Buzz and notification alert verified.",
+            isSuccess = true,
+            isTest = true
+        )
+    }
 
     fun refreshPermissions(context: Context) =
         settingsPreferencesDelegate.refreshPermissions(context, viewModelScope)
@@ -1724,6 +1758,13 @@ class AntigravityViewModel : ViewModel() {
                             } else msg
                         }
                     }
+                    PromptCompletionNotifier.notifyPromptCompleted(
+                        context = context,
+                        conversationId = convId,
+                        prompt = cmd,
+                        response = outputSb.toString().ifBlank { if (exitCode == 0) "Command completed successfully" else "Command failed with code $exitCode" },
+                        isSuccess = exitCode == 0
+                    )
                 } else {
 
                     val stagedAttachments = mutableListOf<Triple<String, String, String>>()
@@ -2363,6 +2404,13 @@ class AntigravityViewModel : ViewModel() {
                             } else msg
                         }
                     }
+                    PromptCompletionNotifier.notifyPromptCompleted(
+                        context = context,
+                        conversationId = convId,
+                        prompt = prompt,
+                        response = finalContent,
+                        isSuccess = exitCode == 0
+                    )
                 }
             } catch (e: Throwable) {
                 if (e is kotlinx.coroutines.CancellationException) {
@@ -2381,6 +2429,13 @@ class AntigravityViewModel : ViewModel() {
                             } else msg
                         }
                     }
+                    PromptCompletionNotifier.notifyPromptCompleted(
+                        context = context,
+                        conversationId = convId,
+                        prompt = prompt,
+                        response = "Execution error: ${e.message}",
+                        isSuccess = false
+                    )
                 }
             } finally {
                 executionWakeLock.release()

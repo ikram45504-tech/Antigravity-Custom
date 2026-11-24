@@ -1,12 +1,19 @@
 package id.vern.antigravity.ui.screens
 
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.media.RingtoneManager
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import id.vern.antigravity.service.PromptCompletionNotifier
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -965,6 +972,34 @@ fun GeneralSettingsPage(
     val planReviewPolicy by viewModel.planReviewPolicy.collectAsStateWithLifecycle()
     val permissionState by viewModel.permissionState.collectAsStateWithLifecycle()
 
+    val completionNotifEnabled by viewModel.completionNotificationEnabled.collectAsStateWithLifecycle()
+    val completionBuzzType by viewModel.completionBuzzType.collectAsStateWithLifecycle()
+    val completionSoundType by viewModel.completionSoundType.collectAsStateWithLifecycle()
+    val completionCustomSoundTitle by viewModel.completionCustomSoundTitle.collectAsStateWithLifecycle()
+    val completionCustomSoundUri by viewModel.completionCustomSoundUri.collectAsStateWithLifecycle()
+
+    var isPreviewPlaying by remember { mutableStateOf(false) }
+    var showBuzzMenu by remember { mutableStateOf(false) }
+    var showSoundMenu by remember { mutableStateOf(false) }
+
+    val ringtonePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val uri: Uri? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                result.data?.getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI, Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                result.data?.getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+            }
+            if (uri != null) {
+                val ringtone = RingtoneManager.getRingtone(context, uri)
+                val title = ringtone?.getTitle(context) ?: "Custom Sound"
+                viewModel.setCompletionCustomSound(context, uri.toString(), title)
+            }
+        }
+    }
+
     var showSecurityMenu by remember { mutableStateOf(false) }
     var showPlanReviewMenu by remember { mutableStateOf(false) }
 
@@ -1038,6 +1073,273 @@ fun GeneralSettingsPage(
                                                 color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    SettingsSectionTitle(title = stringResource(R.string.settings_alert_section_title))
+                    SettingsCard {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                    Text(
+                                        text = stringResource(R.string.settings_alert_toggle_title),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.settings_alert_toggle_desc),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = completionNotifEnabled,
+                                    onCheckedChange = { viewModel.setCompletionNotificationEnabled(context, it) }
+                                )
+                            }
+
+                            if (completionNotifEnabled) {
+                                Spacer(modifier = Modifier.height(14.dp))
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                Spacer(modifier = Modifier.height(14.dp))
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                        Text(
+                                            text = stringResource(R.string.settings_alert_buzz_title),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = stringResource(R.string.settings_alert_buzz_desc),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+
+                                    Box {
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = MaterialTheme.colorScheme.surfaceVariant,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable { showBuzzMenu = true }
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                            ) {
+                                                Text(
+                                                    text = completionBuzzType,
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Icon(
+                                                    imageVector = Icons.Default.ArrowDropDown,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+
+                                        DropdownMenu(
+                                            expanded = showBuzzMenu,
+                                            onDismissRequest = { showBuzzMenu = false }
+                                        ) {
+                                            PromptCompletionNotifier.BUZZ_OPTIONS.forEach { opt ->
+                                                DropdownMenuItem(
+                                                    text = { Text(opt) },
+                                                    onClick = {
+                                                        viewModel.setCompletionBuzzType(context, opt)
+                                                        PromptCompletionNotifier.buzz(context, opt)
+                                                        showBuzzMenu = false
+                                                    },
+                                                    trailingIcon = if (opt == completionBuzzType) {
+                                                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                                    } else null
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(14.dp))
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                Spacer(modifier = Modifier.height(14.dp))
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                        Text(
+                                            text = stringResource(R.string.settings_alert_sound_title),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = when (completionSoundType) {
+                                                PromptCompletionNotifier.SOUND_CUSTOM -> "Custom: $completionCustomSoundTitle"
+                                                PromptCompletionNotifier.SOUND_FLUTE -> "Soothing flute chime"
+                                                PromptCompletionNotifier.SOUND_SYSTEM -> "Phone default notification buzz"
+                                                PromptCompletionNotifier.SOUND_SILENT -> "Silent (Buzz only)"
+                                                else -> stringResource(R.string.settings_alert_sound_desc)
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+
+                                    Box {
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = MaterialTheme.colorScheme.surfaceVariant,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable { showSoundMenu = true }
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                            ) {
+                                                Text(
+                                                    text = when (completionSoundType) {
+                                                        PromptCompletionNotifier.SOUND_FLUTE -> "🎵 Flute"
+                                                        PromptCompletionNotifier.SOUND_SYSTEM -> "🔔 Phone"
+                                                        PromptCompletionNotifier.SOUND_CUSTOM -> "📱 " + completionCustomSoundTitle.take(10)
+                                                        PromptCompletionNotifier.SOUND_SILENT -> "🔕 Silent"
+                                                        else -> completionSoundType
+                                                    },
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Icon(
+                                                    imageVector = Icons.Default.ArrowDropDown,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+
+                                        DropdownMenu(
+                                            expanded = showSoundMenu,
+                                            onDismissRequest = { showSoundMenu = false }
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(R.string.settings_alert_sound_flute)) },
+                                                onClick = {
+                                                    viewModel.setCompletionSoundType(context, PromptCompletionNotifier.SOUND_FLUTE)
+                                                    showSoundMenu = false
+                                                },
+                                                trailingIcon = if (completionSoundType == PromptCompletionNotifier.SOUND_FLUTE) {
+                                                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                                } else null
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(R.string.settings_alert_sound_system)) },
+                                                onClick = {
+                                                    viewModel.setCompletionSoundType(context, PromptCompletionNotifier.SOUND_SYSTEM)
+                                                    showSoundMenu = false
+                                                },
+                                                trailingIcon = if (completionSoundType == PromptCompletionNotifier.SOUND_SYSTEM) {
+                                                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                                } else null
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(R.string.settings_alert_sound_custom)) },
+                                                onClick = {
+                                                    showSoundMenu = false
+                                                    val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                                                        putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_NOTIFICATION or RingtoneManager.TYPE_RINGTONE)
+                                                        putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Select Completion Sound")
+                                                        putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+                                                        putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, true)
+                                                        val curUri = completionCustomSoundUri?.let { Uri.parse(it) } ?: Settings.System.DEFAULT_NOTIFICATION_URI
+                                                        putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, curUri)
+                                                    }
+                                                    ringtonePickerLauncher.launch(intent)
+                                                },
+                                                trailingIcon = if (completionSoundType == PromptCompletionNotifier.SOUND_CUSTOM) {
+                                                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                                } else null
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(R.string.settings_alert_sound_silent)) },
+                                                onClick = {
+                                                    viewModel.setCompletionSoundType(context, PromptCompletionNotifier.SOUND_SILENT)
+                                                    showSoundMenu = false
+                                                },
+                                                trailingIcon = if (completionSoundType == PromptCompletionNotifier.SOUND_SILENT) {
+                                                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                                } else null
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(14.dp))
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                Spacer(modifier = Modifier.height(14.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            if (isPreviewPlaying) {
+                                                PromptCompletionNotifier.stopSoundPreview()
+                                                isPreviewPlaying = false
+                                            } else {
+                                                isPreviewPlaying = true
+                                                PromptCompletionNotifier.playSoundPreview(
+                                                    context = context,
+                                                    soundType = completionSoundType,
+                                                    customUriString = completionCustomSoundUri,
+                                                    onComplete = { isPreviewPlaying = false }
+                                                )
+                                            }
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isPreviewPlaying) Icons.Default.Stop else Icons.Default.PlayArrow,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = if (isPreviewPlaying) "Stop" else stringResource(R.string.settings_alert_preview_sound),
+                                            style = MaterialTheme.typography.labelMedium
+                                        )
+                                    }
+
+                                    Button(
+                                        onClick = {
+                                            Toast.makeText(context, context.getString(R.string.settings_alert_test_toast), Toast.LENGTH_SHORT).show()
+                                            viewModel.testPromptCompletionAlert(context)
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text(stringResource(R.string.settings_alert_test_button), style = MaterialTheme.typography.labelMedium)
                                     }
                                 }
                             }

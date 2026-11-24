@@ -645,5 +645,26 @@
     <string name="model_toast_requires_pro">%1$s memerlukan langganan Google AI Pro</string>
     <string name="model_toast_requires_ultra">%1$s memerlukan langganan Google AI Ultra</string>
     <string name="workspace_label">Ruang Kerja: %1$s</string>
+
+    <!-- Prompt Completion Alert & Notification -->
+    <string name="prompt_completion_channel_name">Pemberitahuan Selesai Prompt</string>
+    <string name="prompt_completion_channel_desc">Notifikasi dan getaran saat eksekusi prompt agen selesai</string>
+    <string name="prompt_completion_notif_title">Prompt Selesai</string>
+    <string name="prompt_completion_notif_title_error">Eksekusi Prompt Terhenti</string>
+    <string name="prompt_completion_notif_ready">Tugas selesai. Ketuk untuk melihat hasil.</string>
+    <string name="settings_alert_section_title">Peringatan Selesai Prompt</string>
+    <string name="settings_alert_toggle_title">Notifikasi Saat Prompt Selesai</string>
+    <string name="settings_alert_toggle_desc">Getar dan kirim notifikasi saat agen menyelesaikan prompt</string>
+    <string name="settings_alert_buzz_title">Getaran / Umpan Balik Haptik</string>
+    <string name="settings_alert_buzz_desc">Pola getaran saat prompt selesai</string>
+    <string name="settings_alert_sound_title">Nada Peringatan Suara</string>
+    <string name="settings_alert_sound_desc">Nada audio yang diputar saat prompt selesai</string>
+    <string name="settings_alert_sound_flute">🎵 Melodi Suling (Lembut)</string>
+    <string name="settings_alert_sound_system">🔔 Nada Bawaan Ponsel</string>
+    <string name="settings_alert_sound_custom">📱 Pilih dari Ponsel…</string>
+    <string name="settings_alert_sound_silent">🔕 Hanya Getar (Hening)</string>
+    <string name="settings_alert_preview_sound">Pratinjau Nada</string>
+    <string name="settings_alert_test_button">Uji Peringatan &amp; Getar</string>
+    <string name="settings_alert_test_toast">Menguji notifikasi selesai prompt &amp; getaran…</string>
 </resources>
 

@@ -645,5 +645,26 @@
     <string name="model_toast_requires_pro">%1$s requires a Google AI Pro subscription</string>
     <string name="model_toast_requires_ultra">%1$s requires a Google AI Ultra subscription</string>
     <string name="workspace_label">Workspace: %1$s</string>
+
+    <!-- Prompt Completion Alert & Notification -->
+    <string name="prompt_completion_channel_name">Prompt Completion Alerts</string>
+    <string name="prompt_completion_channel_desc">Notifications and buzz alerts when agent prompt execution completes</string>
+    <string name="prompt_completion_notif_title">Prompt Completed</string>
+    <string name="prompt_completion_notif_title_error">Prompt Execution Stopped</string>
+    <string name="prompt_completion_notif_ready">Task finished. Tap to review results.</string>
+    <string name="settings_alert_section_title">Prompt Completion Alert</string>
+    <string name="settings_alert_toggle_title">Notify on Prompt Completion</string>
+    <string name="settings_alert_toggle_desc">Vibrate and send a notification when the agent completes a prompt</string>
+    <string name="settings_alert_buzz_title">Buzz / Haptic Feedback</string>
+    <string name="settings_alert_buzz_desc">Vibration pattern when prompt finishes</string>
+    <string name="settings_alert_sound_title">Sound Alert Tone</string>
+    <string name="settings_alert_sound_desc">Audio chime played on prompt completion</string>
+    <string name="settings_alert_sound_flute">🎵 Flute Chime (Gentle)</string>
+    <string name="settings_alert_sound_system">🔔 Phone Default Sound</string>
+    <string name="settings_alert_sound_custom">📱 Select from Phone…</string>
+    <string name="settings_alert_sound_silent">🔕 Vibrate Only (Silent)</string>
+    <string name="settings_alert_preview_sound">Preview Sound</string>
+    <string name="settings_alert_test_button">Test Alert &amp; Buzz</string>
+    <string name="settings_alert_test_toast">Testing prompt completion notification &amp; buzz…</string>
 </resources>
 

@@ -100,6 +100,21 @@ class SettingsPreferencesDelegate {
     private val mutableMcpServers = MutableStateFlow<List<McpServerItem>>(emptyList())
     val mcpServers: StateFlow<List<McpServerItem>> = mutableMcpServers.asStateFlow()
 
+    private val mutableCompletionNotificationEnabled = MutableStateFlow(true)
+    val completionNotificationEnabled: StateFlow<Boolean> = mutableCompletionNotificationEnabled.asStateFlow()
+
+    private val mutableCompletionBuzzType = MutableStateFlow(id.vern.antigravity.service.PromptCompletionNotifier.BUZZ_DEFAULT)
+    val completionBuzzType: StateFlow<String> = mutableCompletionBuzzType.asStateFlow()
+
+    private val mutableCompletionSoundType = MutableStateFlow(id.vern.antigravity.service.PromptCompletionNotifier.SOUND_FLUTE)
+    val completionSoundType: StateFlow<String> = mutableCompletionSoundType.asStateFlow()
+
+    private val mutableCompletionCustomSoundUri = MutableStateFlow<String?>(null)
+    val completionCustomSoundUri: StateFlow<String?> = mutableCompletionCustomSoundUri.asStateFlow()
+
+    private val mutableCompletionCustomSoundTitle = MutableStateFlow("Phone Default")
+    val completionCustomSoundTitle: StateFlow<String> = mutableCompletionCustomSoundTitle.asStateFlow()
+
     fun loadPreferences(
         context: Context,
         onCliModelsDecoded: (List<CliModel>) -> Unit,
@@ -129,6 +144,17 @@ class SettingsPreferencesDelegate {
         val planReview = prefs.getString(AntigravityViewModel.KEY_PLAN_REVIEW_POLICY, "Always Ask") ?: "Always Ask"
         val browserJs = prefs.getString(AntigravityViewModel.KEY_BROWSER_JS_POLICY, "Request Review") ?: "Request Review"
         val creditOverages = prefs.getBoolean(AntigravityViewModel.KEY_ENABLE_CREDIT_OVERAGES, false)
+        val notifEnabled = prefs.getBoolean(AntigravityViewModel.KEY_COMPLETION_NOTIFICATION_ENABLED, true)
+        val buzzType = prefs.getString(AntigravityViewModel.KEY_COMPLETION_BUZZ_TYPE, id.vern.antigravity.service.PromptCompletionNotifier.BUZZ_DEFAULT) ?: id.vern.antigravity.service.PromptCompletionNotifier.BUZZ_DEFAULT
+        val soundType = prefs.getString(AntigravityViewModel.KEY_COMPLETION_SOUND_TYPE, id.vern.antigravity.service.PromptCompletionNotifier.SOUND_FLUTE) ?: id.vern.antigravity.service.PromptCompletionNotifier.SOUND_FLUTE
+        val customUri = prefs.getString(AntigravityViewModel.KEY_COMPLETION_CUSTOM_SOUND_URI, null)
+        val customTitle = prefs.getString(AntigravityViewModel.KEY_COMPLETION_CUSTOM_SOUND_TITLE, "Phone Default") ?: "Phone Default"
+
+        mutableCompletionNotificationEnabled.value = notifEnabled
+        mutableCompletionBuzzType.value = buzzType
+        mutableCompletionSoundType.value = soundType
+        mutableCompletionCustomSoundUri.value = customUri
+        mutableCompletionCustomSoundTitle.value = customTitle
 
         mutableAppearanceConfig.value = AppearanceConfig(
             themeMode = themeMode,
@@ -416,6 +442,40 @@ class SettingsPreferencesDelegate {
         val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putBoolean(AntigravityViewModel.KEY_ENABLE_CREDIT_OVERAGES, enabled).apply()
         onLog("Models", "AI credit overages set to: $enabled")
+    }
+
+    fun setCompletionNotificationEnabled(context: Context, enabled: Boolean, onLog: (String, String) -> Unit) {
+        mutableCompletionNotificationEnabled.value = enabled
+        val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(AntigravityViewModel.KEY_COMPLETION_NOTIFICATION_ENABLED, enabled).apply()
+        onLog("Alerts", "Completion notification set to: $enabled")
+    }
+
+    fun setCompletionBuzzType(context: Context, buzzType: String, onLog: (String, String) -> Unit) {
+        mutableCompletionBuzzType.value = buzzType
+        val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(AntigravityViewModel.KEY_COMPLETION_BUZZ_TYPE, buzzType).apply()
+        onLog("Alerts", "Completion buzz set to: $buzzType")
+    }
+
+    fun setCompletionSoundType(context: Context, soundType: String, onLog: (String, String) -> Unit) {
+        mutableCompletionSoundType.value = soundType
+        val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(AntigravityViewModel.KEY_COMPLETION_SOUND_TYPE, soundType).apply()
+        onLog("Alerts", "Completion sound set to: $soundType")
+    }
+
+    fun setCompletionCustomSound(context: Context, uri: String?, title: String, onLog: (String, String) -> Unit) {
+        mutableCompletionCustomSoundUri.value = uri
+        mutableCompletionCustomSoundTitle.value = title
+        mutableCompletionSoundType.value = id.vern.antigravity.service.PromptCompletionNotifier.SOUND_CUSTOM
+        val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString(AntigravityViewModel.KEY_COMPLETION_SOUND_TYPE, id.vern.antigravity.service.PromptCompletionNotifier.SOUND_CUSTOM)
+            .putString(AntigravityViewModel.KEY_COMPLETION_CUSTOM_SOUND_URI, uri)
+            .putString(AntigravityViewModel.KEY_COMPLETION_CUSTOM_SOUND_TITLE, title)
+            .apply()
+        onLog("Alerts", "Completion custom sound set to: $title")
     }
 
     fun refreshPermissions(context: Context, scope: CoroutineScope) {
