@@ -39,4 +39,18 @@ class LiveVoiceControllerTest {
         val truncated = LiveVoiceSanitizer.sanitizeForSpeech(sentenceText, maxChars = 40)
         assertEquals("First sentence ends cleanly.", truncated)
     }
+
+    @Test
+    fun `VoiceLanguage resolves Urdu locales and voice prompt instructions`() {
+        assertEquals(VoiceLanguage.URDU_PK, VoiceLanguage.fromKey("ur-PK"))
+        assertEquals(VoiceLanguage.URDU_IN, VoiceLanguage.fromKey("ur-IN"))
+        assertEquals(VoiceLanguage.AUTO, VoiceLanguage.fromKey("unknown"))
+        assertTrue(VoiceLanguage.URDU_PK.isUrdu)
+        assertFalse(VoiceLanguage.ENGLISH_US.isUrdu)
+        assertEquals("ur", VoiceLanguage.URDU_PK.targetLocale().language)
+
+        val urduInstruction = VoiceLanguage.URDU_PK.buildVoicePromptInstruction(replyInVoiceLanguage = true)
+        assertTrue(urduInstruction?.contains("Urdu") == true)
+        assertEquals(null, VoiceLanguage.URDU_PK.buildVoicePromptInstruction(replyInVoiceLanguage = false))
+    }
 }

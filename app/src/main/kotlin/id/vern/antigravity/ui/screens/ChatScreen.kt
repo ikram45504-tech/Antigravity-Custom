@@ -81,6 +81,7 @@ import androidx.core.content.ContextCompat
 import id.vern.antigravity.data.MessageStatus
 import id.vern.antigravity.data.RunningSubagent
 import id.vern.antigravity.voice.LiveVoiceController
+import id.vern.antigravity.voice.VoiceLanguage
 import id.vern.antigravity.ui.components.AgentDetailsBottomSheet
 import id.vern.antigravity.ui.components.DialogBlurEffect
 import id.vern.antigravity.ui.components.InstallationProgressDialog
@@ -195,6 +196,9 @@ fun ChatScreen(
     val themePreset by viewModel.themePreset.collectAsStateWithLifecycle()
     val pendingInputText by viewModel.pendingInputText.collectAsStateWithLifecycle()
     val securityPreset by viewModel.securityPreset.collectAsStateWithLifecycle()
+    val voiceLanguage by viewModel.voiceLanguage.collectAsStateWithLifecycle()
+    val voiceReplyInLanguage by viewModel.voiceReplyInLanguage.collectAsStateWithLifecycle()
+    val voiceSpeechRate by viewModel.voiceSpeechRate.collectAsStateWithLifecycle()
 
     var showMenuDropdown by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
@@ -223,10 +227,21 @@ fun ChatScreen(
                 viewModel.chatMessages.value.lastOrNull()?.id
             }
             awaitingVoiceResponse = true
-            viewModel.sendMessage(context, spokenText)
+            val voiceInstr = viewModel.voiceLanguage.value.buildVoicePromptInstruction(
+                viewModel.voiceReplyInLanguage.value
+            )
+            viewModel.sendMessage(context, spokenText, voiceInstruction = voiceInstr)
         }
     }
     val liveVoiceState by liveVoiceController.state.collectAsStateWithLifecycle()
+
+    LaunchedEffect(voiceLanguage, voiceReplyInLanguage, voiceSpeechRate) {
+        liveVoiceController.configure(
+            language = voiceLanguage,
+            replyInLanguage = voiceReplyInLanguage,
+            speechRate = voiceSpeechRate
+        )
+    }
 
     DisposableEffect(liveVoiceController) {
         onDispose { liveVoiceController.destroy() }
@@ -1798,7 +1813,7 @@ fun ChatScreen(
                     externalInputText = pendingInputText,
                     onExternalInputTextConsumed = { viewModel.clearPendingInputText() },
                     onSendMessage = { text ->
-                        if (liveVoiceState.active) {
+                        val voiceInstr = if (liveVoiceState.active) {
                             val targetConvId = viewModel.activeConversationId.value
                             awaitingVoiceConvId = targetConvId
                             awaitingVoiceTurnBaselineId = if (targetConvId != null) {
@@ -1808,8 +1823,9 @@ fun ChatScreen(
                             }
                             awaitingVoiceResponse = true
                             liveVoiceController.onTurnStarted()
-                        }
-                        viewModel.sendMessage(context, text)
+                            voiceLanguage.buildVoicePromptInstruction(voiceReplyInLanguage)
+                        } else null
+                        viewModel.sendMessage(context, text, voiceInstruction = voiceInstr)
                         scope.launch {
                             kotlinx.coroutines.delay(60)
                             runCatching {
@@ -1843,6 +1859,11 @@ fun ChatScreen(
                     onToggleLiveVoice = toggleLiveVoice,
                     onToggleLiveVoiceMute = { liveVoiceController.toggleMute() },
                     onSkipLiveVoiceSpeaking = { liveVoiceController.skipSpeaking() },
+                    onRetryLiveVoice = { liveVoiceController.retryListening() },
+                    voiceLanguage = voiceLanguage,
+                    onVoiceLanguageChange = { lang -> viewModel.setVoiceLanguage(context, lang) },
+                    onToggleVoiceReplyInLanguage = { enabled -> viewModel.setVoiceReplyInLanguage(context, enabled) },
+                    onVoiceSpeechRateChange = { rate -> viewModel.setVoiceSpeechRate(context, rate) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(

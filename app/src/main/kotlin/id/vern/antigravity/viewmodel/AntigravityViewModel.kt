@@ -207,6 +207,9 @@ class AntigravityViewModel : ViewModel() {
         const val KEY_COMPLETION_SOUND_TYPE = "ag_completion_sound_type"
         const val KEY_COMPLETION_CUSTOM_SOUND_URI = "ag_completion_custom_sound_uri"
         const val KEY_COMPLETION_CUSTOM_SOUND_TITLE = "ag_completion_custom_sound_title"
+        const val KEY_VOICE_LANGUAGE = "ag_voice_language"
+        const val KEY_VOICE_REPLY_IN_LANGUAGE = "ag_voice_reply_in_language"
+        const val KEY_VOICE_SPEECH_RATE = "ag_voice_speech_rate"
         const val KEY_USER_PROJECTS = "ag_user_projects"
         const val KEY_CONVERSATION_HISTORY = "ag_conversation_history"
         const val KEY_LAST_ACTIVE_CONV_ID = "ag_last_active_conv_id"
@@ -254,6 +257,9 @@ class AntigravityViewModel : ViewModel() {
     val completionSoundType: StateFlow<String> = settingsPreferencesDelegate.completionSoundType
     val completionCustomSoundUri: StateFlow<String?> = settingsPreferencesDelegate.completionCustomSoundUri
     val completionCustomSoundTitle: StateFlow<String> = settingsPreferencesDelegate.completionCustomSoundTitle
+    val voiceLanguage: StateFlow<id.vern.antigravity.voice.VoiceLanguage> = settingsPreferencesDelegate.voiceLanguage
+    val voiceReplyInLanguage: StateFlow<Boolean> = settingsPreferencesDelegate.voiceReplyInLanguage
+    val voiceSpeechRate: StateFlow<Float> = settingsPreferencesDelegate.voiceSpeechRate
     val permissionState: StateFlow<PermissionGrantsState> = settingsPreferencesDelegate.permissionState
     val installedRulesList: StateFlow<List<RuleItem>> = settingsPreferencesDelegate.installedRulesList
     val mcpServers: StateFlow<List<McpServerItem>> = settingsPreferencesDelegate.mcpServers
@@ -668,6 +674,15 @@ class AntigravityViewModel : ViewModel() {
 
     fun setCompletionCustomSound(context: Context, uri: String?, title: String) =
         settingsPreferencesDelegate.setCompletionCustomSound(context, uri, title, ::addLog)
+
+    fun setVoiceLanguage(context: Context, language: id.vern.antigravity.voice.VoiceLanguage) =
+        settingsPreferencesDelegate.setVoiceLanguage(context, language, ::addLog)
+
+    fun setVoiceReplyInLanguage(context: Context, enabled: Boolean) =
+        settingsPreferencesDelegate.setVoiceReplyInLanguage(context, enabled, ::addLog)
+
+    fun setVoiceSpeechRate(context: Context, rate: Float) =
+        settingsPreferencesDelegate.setVoiceSpeechRate(context, rate, ::addLog)
 
     fun testPromptCompletionAlert(context: Context) {
         id.vern.antigravity.service.PromptCompletionNotifier.notifyPromptCompleted(
@@ -1631,7 +1646,12 @@ class AntigravityViewModel : ViewModel() {
         }
     }
 
-    fun sendMessage(context: Context, content: String, attachments: List<AttachedFile> = emptyList()) {
+    fun sendMessage(
+        context: Context,
+        content: String,
+        attachments: List<AttachedFile> = emptyList(),
+        voiceInstruction: String? = null
+    ) {
         val currentAttachments = if (attachments.isNotEmpty()) attachments else mutableAttachedFiles.value
         if (content.isBlank() && currentAttachments.isEmpty()) return
 
@@ -1666,7 +1686,7 @@ class AntigravityViewModel : ViewModel() {
             conversationManagerDelegate.setActiveConversationIdDirect(convId)
         }
         mutableAttachedFiles.value = emptyList()
-        sendMessageForConversation(context, convId, content, currentAttachments)
+        sendMessageForConversation(context, convId, content, currentAttachments, voiceInstruction)
     }
 
     fun proceedWithPlan(context: Context, messageId: String) {
@@ -1684,7 +1704,8 @@ class AntigravityViewModel : ViewModel() {
         context: Context,
         convId: String,
         content: String,
-        currentAttachments: List<AttachedFile>
+        currentAttachments: List<AttachedFile>,
+        voiceInstruction: String? = null
     ) {
         if (isConversationExecuting(convId)) {
             queueMessage(content, currentAttachments, convId)
@@ -1774,7 +1795,7 @@ class AntigravityViewModel : ViewModel() {
             return
         }
 
-        executeAiTurn(context, effectiveContent, convId, currentAttachments)
+        executeAiTurn(context, effectiveContent, convId, currentAttachments, voiceInstruction)
     }
 
     private val executionWakeLock = WakeLockHolder()
@@ -1857,7 +1878,8 @@ class AntigravityViewModel : ViewModel() {
         context: Context,
         prompt: String,
         convId: String,
-        attachments: List<AttachedFile> = emptyList()
+        attachments: List<AttachedFile> = emptyList(),
+        voiceInstruction: String? = null
     ) {
         jobsByConv.remove(convId)?.cancel()
         val job = viewModelScope.launch(Dispatchers.IO) {
@@ -1919,7 +1941,8 @@ class AntigravityViewModel : ViewModel() {
                     prompt = prompt,
                     convId = convId,
                     attachments = attachments,
-                    callbacks = callbacks
+                    callbacks = callbacks,
+                    voiceInstruction = voiceInstruction
                 )
             } catch (e: Throwable) {
                 if (e is kotlinx.coroutines.CancellationException) {

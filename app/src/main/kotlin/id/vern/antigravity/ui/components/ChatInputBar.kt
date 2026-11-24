@@ -15,10 +15,12 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.scale
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -58,20 +60,25 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Info
+import id.vern.antigravity.voice.LiveVoiceController
 import id.vern.antigravity.voice.LiveVoicePhase
 import id.vern.antigravity.voice.LiveVoiceUiState
+import id.vern.antigravity.voice.TtsAvailabilityStatus
+import id.vern.antigravity.voice.VoiceLanguage
 import androidx.compose.material.icons.outlined.GppMaybe
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -218,6 +225,11 @@ fun ChatInputBar(
     onToggleLiveVoice: () -> Unit = {},
     onToggleLiveVoiceMute: () -> Unit = {},
     onSkipLiveVoiceSpeaking: () -> Unit = {},
+    onRetryLiveVoice: () -> Unit = {},
+    voiceLanguage: VoiceLanguage = VoiceLanguage.AUTO,
+    onVoiceLanguageChange: (VoiceLanguage) -> Unit = {},
+    onToggleVoiceReplyInLanguage: (Boolean) -> Unit = {},
+    onVoiceSpeechRateChange: (Float) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -438,12 +450,13 @@ fun ChatInputBar(
         }
 
         AnimatedVisibility(visible = liveVoiceState.active) {
+            var showVoiceLangMenu by remember { mutableStateOf(false) }
             val phaseLabel = when (liveVoiceState.phase) {
                 LiveVoicePhase.LISTENING -> stringResource(R.string.chat_live_voice_listening)
                 LiveVoicePhase.THINKING -> stringResource(R.string.chat_live_voice_thinking)
                 LiveVoicePhase.SPEAKING -> stringResource(R.string.chat_live_voice_speaking)
                 LiveVoicePhase.PAUSED -> stringResource(R.string.chat_live_voice_paused)
-                LiveVoicePhase.ERROR -> liveVoiceState.statusDetail.ifBlank { "Error" }
+                LiveVoicePhase.ERROR -> liveVoiceState.statusDetail.ifBlank { "Voice Error" }
                 LiveVoicePhase.IDLE -> ""
             }
             val phaseColor = when (liveVoiceState.phase) {
@@ -454,88 +467,307 @@ fun ChatInputBar(
                 LiveVoicePhase.ERROR -> AntigravityRed
                 LiveVoicePhase.IDLE -> MaterialTheme.colorScheme.onSurfaceVariant
             }
+            val orbScale = if (
+                liveVoiceState.phase == LiveVoicePhase.LISTENING ||
+                liveVoiceState.phase == LiveVoicePhase.SPEAKING
+            ) pulseGlow else 1f
+            val nextRate = when {
+                liveVoiceState.speechRate < 0.90f -> 0.95f
+                liveVoiceState.speechRate < 1.05f -> 1.15f
+                else -> 0.85f
+            }
+
             Surface(
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(18.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 4.dp)
-                    .border(1.dp, phaseColor.copy(alpha = 0.45f), RoundedCornerShape(16.dp)),
-                tonalElevation = 2.dp
+                    .border(1.2.dp, phaseColor.copy(alpha = 0.55f), RoundedCornerShape(18.dp)),
+                tonalElevation = 4.dp
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = when (liveVoiceState.phase) {
-                            LiveVoicePhase.SPEAKING -> Icons.Default.VolumeUp
-                            LiveVoicePhase.PAUSED -> Icons.Default.MicOff
-                            else -> Icons.Default.GraphicEq
-                        },
-                        contentDescription = null,
-                        tint = phaseColor,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = phaseLabel,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = phaseColor
-                        )
-                        if (liveVoiceState.partialTranscript.isNotBlank()) {
-                            Text(
-                                text = liveVoiceState.partialTranscript,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .scale(orbScale)
+                                .clip(CircleShape)
+                                .background(phaseColor.copy(alpha = 0.16f))
+                                .border(1.dp, phaseColor.copy(alpha = 0.45f), CircleShape)
+                                .clickable {
+                                    when (liveVoiceState.phase) {
+                                        LiveVoicePhase.SPEAKING -> onSkipLiveVoiceSpeaking()
+                                        LiveVoicePhase.ERROR, LiveVoicePhase.PAUSED -> onRetryLiveVoice()
+                                        else -> onToggleLiveVoiceMute()
+                                    }
+                                }
+                        ) {
+                            Icon(
+                                imageVector = when (liveVoiceState.phase) {
+                                    LiveVoicePhase.SPEAKING -> Icons.AutoMirrored.Filled.VolumeUp
+                                    LiveVoicePhase.PAUSED -> Icons.Default.MicOff
+                                    LiveVoicePhase.ERROR -> Icons.Default.Refresh
+                                    else -> Icons.Default.GraphicEq
+                                },
+                                contentDescription = null,
+                                tint = phaseColor,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
-                    }
-                    if (liveVoiceState.phase == LiveVoicePhase.SPEAKING) {
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = phaseLabel,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = phaseColor,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (liveVoiceState.activeVoiceLabel.isNotBlank() &&
+                                    liveVoiceState.ttsAvailability == TtsAvailabilityStatus.READY
+                                ) {
+                                    Text(
+                                        text = "• ${liveVoiceState.activeVoiceLabel}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                            val subtitleText = when {
+                                liveVoiceState.partialTranscript.isNotBlank() -> liveVoiceState.partialTranscript
+                                liveVoiceState.phase == LiveVoicePhase.SPEAKING && liveVoiceState.lastSpokenText.isNotBlank() ->
+                                    liveVoiceState.lastSpokenText
+                                liveVoiceState.phase == LiveVoicePhase.LISTENING ->
+                                    stringResource(R.string.chat_live_voice_speak_now)
+                                else -> ""
+                            }
+                            if (subtitleText.isNotBlank()) {
+                                Text(
+                                    text = subtitleText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        if (liveVoiceState.phase == LiveVoicePhase.ERROR) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = AntigravityBlue.copy(alpha = 0.16f),
+                                modifier = Modifier
+                                    .padding(end = 4.dp)
+                                    .clickable { onRetryLiveVoice() }
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.chat_live_voice_retry),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = AntigravityBlue,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        } else if (liveVoiceState.phase == LiveVoicePhase.SPEAKING) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier
+                                    .padding(end = 4.dp)
+                                    .clickable { onSkipLiveVoiceSpeaking() }
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.chat_live_voice_skip),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                        IconButton(
+                            onClick = onToggleLiveVoiceMute,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (liveVoiceState.isMuted) Icons.Default.MicOff else Icons.Default.Mic,
+                                contentDescription = null,
+                                tint = if (liveVoiceState.isMuted) AntigravityAmber else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier
-                                .padding(end = 6.dp)
-                                .clickable { onSkipLiveVoiceSpeaking() }
+                            color = AntigravityRed.copy(alpha = 0.16f),
+                            modifier = Modifier.clickable { onToggleLiveVoice() }
                         ) {
                             Text(
-                                text = stringResource(R.string.chat_live_voice_skip),
+                                text = stringResource(R.string.chat_live_voice_end),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurface,
+                                fontWeight = FontWeight.SemiBold,
+                                color = AntigravityRed,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
                         }
                     }
-                    IconButton(
-                        onClick = onToggleLiveVoiceMute,
-                        modifier = Modifier.size(28.dp)
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(
-                            imageVector = if (liveVoiceState.isMuted) Icons.Default.MicOff else Icons.Default.Mic,
-                            contentDescription = null,
-                            tint = if (liveVoiceState.isMuted) AntigravityAmber else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp)
-                        )
+                        Box {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
+                                modifier = Modifier.clickable { showVoiceLangMenu = true }
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Language,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = voiceLanguage.shortLabel,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.KeyboardArrowDown,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
+                            DropdownMenu(
+                                expanded = showVoiceLangMenu,
+                                onDismissRequest = { showVoiceLangMenu = false },
+                                shape = RoundedCornerShape(14.dp),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                            ) {
+                                VoiceLanguage.entries.forEach { lang ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = "${lang.displayName} (${lang.shortLabel})",
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
+                                        },
+                                        trailingIcon = if (lang == voiceLanguage) {
+                                            {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        } else null,
+                                        onClick = {
+                                            onVoiceLanguageChange(lang)
+                                            showVoiceLangMenu = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        if (voiceLanguage.isUrdu) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (liveVoiceState.replyInLanguage) {
+                                    AntigravityGreen.copy(alpha = 0.16f)
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                                },
+                                modifier = Modifier.clickable {
+                                    onToggleVoiceReplyInLanguage(!liveVoiceState.replyInLanguage)
+                                }
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.chat_live_voice_urdu_reply),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (liveVoiceState.replyInLanguage) AntigravityGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f),
+                            modifier = Modifier.clickable { onVoiceSpeechRateChange(nextRate) }
+                        ) {
+                            Text(
+                                text = "${liveVoiceState.speechRate}x",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
                     }
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = AntigravityRed.copy(alpha = 0.16f),
-                        modifier = Modifier.clickable { onToggleLiveVoice() }
-                    ) {
-                        Text(
-                            text = stringResource(R.string.chat_live_voice_end),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = AntigravityRed,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+
+                    if (voiceLanguage.isUrdu && (
+                            liveVoiceState.ttsAvailability == TtsAvailabilityStatus.MISSING_DATA ||
+                            liveVoiceState.ttsAvailability == TtsAvailabilityStatus.NOT_SUPPORTED
                         )
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(AntigravityAmber.copy(alpha = 0.14f))
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.chat_live_voice_tts_missing),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AntigravityAmber,
+                                modifier = Modifier.weight(1f).padding(end = 8.dp)
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = AntigravityAmber.copy(alpha = 0.25f),
+                                modifier = Modifier.clickable {
+                                    LiveVoiceController.openTtsVoiceInstaller(context)
+                                }
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.chat_live_voice_install_tts),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1290,6 +1522,12 @@ fun ChatInputBar(
                                         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                                             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                                             putExtra(RecognizerIntent.EXTRA_PROMPT, voicePrompt)
+                                            val bcp47 = voiceLanguage.bcp47Tag
+                                            if (!bcp47.isNullOrBlank()) {
+                                                putExtra(RecognizerIntent.EXTRA_LANGUAGE, bcp47)
+                                                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, bcp47)
+                                                putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, bcp47)
+                                            }
                                         }
                                         speechLauncher.launch(intent)
                                     } catch (e: Exception) {

@@ -55,7 +55,8 @@ class TurnExecutionDelegate {
         prompt: String,
         convId: String,
         attachments: List<AttachedFile>,
-        callbacks: Callbacks
+        callbacks: Callbacks,
+        voiceInstruction: String? = null
     ) {
         val turnStartTime = System.currentTimeMillis()
         val assistantMsgId = UUID.randomUUID().toString()
@@ -163,7 +164,8 @@ class TurnExecutionDelegate {
                 sessionToResume = activeCliConvId ?: priorCliSession,
                 currentTurn = currentTurn,
                 prompt = prompt,
-                stagedAttachments = stagedAttachments
+                stagedAttachments = stagedAttachments,
+                voiceInstruction = voiceInstruction
             )
 
             if (currentTurn > 1) {
@@ -555,7 +557,8 @@ class TurnExecutionDelegate {
         sessionToResume: String?,
         currentTurn: Int,
         prompt: String,
-        stagedAttachments: List<Triple<String, String, String>>
+        stagedAttachments: List<Triple<String, String, String>>,
+        voiceInstruction: String? = null
     ): List<String> {
         val args = mutableListOf<String>()
         val currentSec = securityPreset.lowercase()
@@ -579,8 +582,14 @@ class TurnExecutionDelegate {
             args.add(sessionToResume)
         }
         args.add("--print")
+        val voicePrefix = if (!voiceInstruction.isNullOrBlank() && !prompt.trimStart().startsWith("/")) {
+            "${voiceInstruction.trim()}\n\n"
+        } else {
+            ""
+        }
         val currentPrompt = if (currentTurn == 1 && stagedAttachments.isNotEmpty()) {
             buildString {
+                if (voicePrefix.isNotEmpty()) append(voicePrefix)
                 append("### USER ATTACHMENTS\n")
                 append("The user has attached the following ${stagedAttachments.size} file(s):\n")
                 stagedAttachments.forEachIndexed { idx, (name, path, mime) ->
@@ -598,7 +607,7 @@ class TurnExecutionDelegate {
                 append(if (prompt.isNotBlank()) prompt else "Please inspect the attached file(s) and assist the user.")
             }
         } else if (currentTurn == 1) {
-            prompt
+            if (voicePrefix.isNotEmpty()) "$voicePrefix$prompt" else prompt
         } else {
             "Continue and complete the task based on previous tool results. Provide thorough analysis or confirmation once finished."
         }

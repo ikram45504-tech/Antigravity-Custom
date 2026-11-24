@@ -115,6 +115,15 @@ class SettingsPreferencesDelegate {
     private val mutableCompletionCustomSoundTitle = MutableStateFlow("Phone Default")
     val completionCustomSoundTitle: StateFlow<String> = mutableCompletionCustomSoundTitle.asStateFlow()
 
+    private val mutableVoiceLanguage = MutableStateFlow(id.vern.antigravity.voice.VoiceLanguage.AUTO)
+    val voiceLanguage: StateFlow<id.vern.antigravity.voice.VoiceLanguage> = mutableVoiceLanguage.asStateFlow()
+
+    private val mutableVoiceReplyInLanguage = MutableStateFlow(true)
+    val voiceReplyInLanguage: StateFlow<Boolean> = mutableVoiceReplyInLanguage.asStateFlow()
+
+    private val mutableVoiceSpeechRate = MutableStateFlow(0.95f)
+    val voiceSpeechRate: StateFlow<Float> = mutableVoiceSpeechRate.asStateFlow()
+
     fun loadPreferences(
         context: Context,
         onCliModelsDecoded: (List<CliModel>) -> Unit,
@@ -155,6 +164,11 @@ class SettingsPreferencesDelegate {
         mutableCompletionSoundType.value = soundType
         mutableCompletionCustomSoundUri.value = customUri
         mutableCompletionCustomSoundTitle.value = customTitle
+
+        val savedVoiceLang = prefs.getString(AntigravityViewModel.KEY_VOICE_LANGUAGE, id.vern.antigravity.voice.VoiceLanguage.AUTO.key)
+        mutableVoiceLanguage.value = id.vern.antigravity.voice.VoiceLanguage.fromKey(savedVoiceLang)
+        mutableVoiceReplyInLanguage.value = prefs.getBoolean(AntigravityViewModel.KEY_VOICE_REPLY_IN_LANGUAGE, true)
+        mutableVoiceSpeechRate.value = prefs.getFloat(AntigravityViewModel.KEY_VOICE_SPEECH_RATE, 0.95f).coerceIn(0.6f, 1.6f)
 
         mutableAppearanceConfig.value = AppearanceConfig(
             themeMode = themeMode,
@@ -476,6 +490,28 @@ class SettingsPreferencesDelegate {
             .putString(AntigravityViewModel.KEY_COMPLETION_CUSTOM_SOUND_TITLE, title)
             .apply()
         onLog("Alerts", "Completion custom sound set to: $title")
+    }
+
+    fun setVoiceLanguage(context: Context, language: id.vern.antigravity.voice.VoiceLanguage, onLog: (String, String) -> Unit) {
+        mutableVoiceLanguage.value = language
+        val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(AntigravityViewModel.KEY_VOICE_LANGUAGE, language.key).apply()
+        onLog("Voice", "Voice language set to: ${language.displayName}")
+    }
+
+    fun setVoiceReplyInLanguage(context: Context, enabled: Boolean, onLog: (String, String) -> Unit) {
+        mutableVoiceReplyInLanguage.value = enabled
+        val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(AntigravityViewModel.KEY_VOICE_REPLY_IN_LANGUAGE, enabled).apply()
+        onLog("Voice", "Voice language reply instruction set to: $enabled")
+    }
+
+    fun setVoiceSpeechRate(context: Context, rate: Float, onLog: (String, String) -> Unit) {
+        val clamped = rate.coerceIn(0.6f, 1.6f)
+        mutableVoiceSpeechRate.value = clamped
+        val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putFloat(AntigravityViewModel.KEY_VOICE_SPEECH_RATE, clamped).apply()
+        onLog("Voice", "Voice speech rate set to: ${clamped}x")
     }
 
     fun refreshPermissions(context: Context, scope: CoroutineScope) {

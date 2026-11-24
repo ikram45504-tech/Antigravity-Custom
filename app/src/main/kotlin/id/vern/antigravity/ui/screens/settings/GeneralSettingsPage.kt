@@ -14,6 +14,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import id.vern.antigravity.service.PromptCompletionNotifier
+import id.vern.antigravity.voice.LiveVoiceController
+import id.vern.antigravity.voice.VoiceLanguage
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -530,6 +532,10 @@ fun GeneralSettingsPage(
     val completionSoundType by viewModel.completionSoundType.collectAsStateWithLifecycle()
     val completionCustomSoundTitle by viewModel.completionCustomSoundTitle.collectAsStateWithLifecycle()
     val completionCustomSoundUri by viewModel.completionCustomSoundUri.collectAsStateWithLifecycle()
+    val voiceLanguage by viewModel.voiceLanguage.collectAsStateWithLifecycle()
+    val voiceReplyInLanguage by viewModel.voiceReplyInLanguage.collectAsStateWithLifecycle()
+    val voiceSpeechRate by viewModel.voiceSpeechRate.collectAsStateWithLifecycle()
+    var showVoiceLanguageMenu by remember { mutableStateOf(false) }
 
     var isPreviewPlaying by remember { mutableStateOf(false) }
     var showBuzzMenu by remember { mutableStateOf(false) }
@@ -895,6 +901,138 @@ fun GeneralSettingsPage(
                                         Text(stringResource(R.string.settings_alert_test_button), style = MaterialTheme.typography.labelMedium)
                                     }
                                 }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    SettingsSectionTitle(title = "Live Voice & Urdu")
+                    SettingsCard {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                    Text(
+                                        text = "Voice & Dictation Language",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "Sets speech recognition and TTS language (e.g. Urdu PK/IN).",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Box {
+                                    OutlinedButton(
+                                        onClick = { showVoiceLanguageMenu = true },
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(voiceLanguage.shortLabel, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    }
+                                    DropdownMenu(
+                                        expanded = showVoiceLanguageMenu,
+                                        onDismissRequest = { showVoiceLanguageMenu = false },
+                                        shape = RoundedCornerShape(16.dp),
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                                    ) {
+                                        VoiceLanguage.entries.forEach { lang ->
+                                            DropdownMenuItem(
+                                                text = { Text("${lang.displayName} (${lang.shortLabel})", fontSize = 13.sp) },
+                                                trailingIcon = if (lang == voiceLanguage) {
+                                                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                                } else null,
+                                                onClick = {
+                                                    viewModel.setVoiceLanguage(context, lang)
+                                                    showVoiceLanguageMenu = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                    Text(
+                                        text = "Clear Urdu Script Replies",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "Guides Live Voice replies into concise Urdu script (اردو) for clear pronunciation.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = voiceReplyInLanguage,
+                                    onCheckedChange = { viewModel.setVoiceReplyInLanguage(context, it) }
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            Text(
+                                text = "Speech Playback Speed",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                LiveVoiceController.SPEECH_RATE_OPTIONS.forEach { rate ->
+                                    val selected = kotlin.math.abs(voiceSpeechRate - rate) < 0.02f
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = if (selected) {
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                                        },
+                                        border = if (selected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { viewModel.setVoiceSpeechRate(context, rate) }
+                                    ) {
+                                        Text(
+                                            text = "${rate}x",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier.padding(vertical = 8.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+                            OutlinedButton(
+                                onClick = { LiveVoiceController.openTtsVoiceInstaller(context) },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("Install / Manage Urdu TTS Voice Data", style = MaterialTheme.typography.labelMedium)
                             }
                         }
                     }

@@ -287,6 +287,11 @@
     <string name="chat_live_voice_paused">Mic muted</string>
     <string name="chat_live_voice_skip">Skip</string>
     <string name="chat_live_voice_end">End</string>
+    <string name="chat_live_voice_retry">Retry</string>
+    <string name="chat_live_voice_install_tts">Install Urdu Voice</string>
+    <string name="chat_live_voice_tts_missing">Urdu TTS voice data is missing on this phone. Tap Install Urdu Voice.</string>
+    <string name="chat_live_voice_urdu_reply">اردو جواب</string>
+    <string name="chat_live_voice_speak_now">Speak naturally in Urdu or English…</string>
     <string name="chat_live_voice_permission_denied">Microphone permission is required for live voice chat</string>
     <string name="chat_plan_card_title">Implementation Plan</string>
     <string name="chat_plan_card_ready">Ready for review</string>
