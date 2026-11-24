@@ -149,6 +149,12 @@ android {
 
 // Guard against the historical failure mode where a release APK was produced
 // without any signing configuration and silently shipped debug-signed.
+tasks.withType<Test>().configureEach {
+    testLogging {
+        events("passed", "skipped", "failed")
+    }
+}
+
 tasks.matching { it.name == "assembleRelease" || it.name == "bundleRelease" }.configureEach {
     doFirst {
         if (!hasReleaseSigning) {
@@ -164,6 +170,9 @@ tasks.matching { it.name == "assembleRelease" || it.name == "bundleRelease" }.co
 }
 
 dependencies {
+    // Unit tests run on the JVM (`./gradlew test`), no device or emulator needed.
+    testImplementation(libs.junit)
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.google.material)

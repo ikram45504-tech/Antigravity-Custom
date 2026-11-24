@@ -40,8 +40,109 @@ Antigravity for Android runs Google Antigravity AI coding agents on Android devi
 
 ## Requirements
 
-- Android 11+ (`arm64-v8a`)
+- Android 11+ (`arm64-v8a`) — enforced by `minSdk = 30`
 - Storage & notification permissions
+
+## Building from source
+
+Prerequisites: **JDK 17**, the **Android SDK** with platform 36, and an ARM64 target device.
+
+```bash
+git clone https://github.com/ikram45504-tech/Antigravity-Custom.git
+cd Antigravity-Custom
+
+# Point Gradle at your SDK (or export ANDROID_HOME instead).
+echo "sdk.dir=$HOME/Android/Sdk" > local.properties
+
+# Debug build — this always works and needs no signing key.
+./gradlew assembleDebug
+# -> app/build/outputs/apk/debug/app-debug.apk
+```
+
+### Release builds
+
+Release builds require a signing key and **fail closed** if one is missing, so a debug-signed APK
+can never be published as a release by accident.
+
+1. Create or obtain the keystore (never committed):
+
+   ```bash
+   keytool -genkeypair -v -keystore app/release.keystore \
+     -alias antigravity -keyalg RSA -keysize 4096 -validity 10000
+   ```
+
+2. Supply the credentials, either in `local.properties`:
+
+   ```properties
+   signing.storePassword=...
+   signing.keyAlias=antigravity
+   signing.keyPassword=...
+   ```
+
+   ...or through the environment:
+
+   ```bash
+   SIGNING_STORE_PASSWORD=... SIGNING_KEY_ALIAS=antigravity SIGNING_KEY_PASSWORD=... \
+     ./gradlew assembleRelease
+   ```
+
+There are no default passwords. `local.properties`, `*.keystore` and `*.jks` are git-ignored.
+
+### Tests
+
+```bash
+./gradlew testDebugUnitTest                        # Kotlin/JVM unit tests
+python3 -m unittest discover -s app/src/test/python -v   # overlay/daemon helpers
+```
+
+Both run in CI (`.github/workflows/tests.yml`).
+
+### CI release pipeline
+
+`.github/workflows/android-release.yml` builds and, on a `v*` tag, publishes a GitHub Release.
+Configure these repository secrets before tagging:
+
+| Secret | Purpose |
+| --- | --- |
+| `KEYSTORE_BASE64` | `base64 -w0 app/release.keystore` output |
+| `SIGNING_STORE_PASSWORD` | Keystore password |
+| `SIGNING_KEY_ALIAS` | Key alias |
+| `SIGNING_KEY_PASSWORD` | Key password |
+
+The workflow verifies all four are present and fails the build if any is missing.
+
+## Architecture
+
+The app is a Kotlin/Compose shell around a bundled ARM64 Linux userspace.
+
+```
+ ┌─────────────────────────── Android app (Kotlin) ───────────────────────────┐
+ │  ui/         Compose screens (Chat, Workspace, Settings, Splash)            │
+ │  viewmodel/  State holders; delegates split by concern (auth, workspace,    │
+ │              customization, git, persistence, transcript parsing)           │
+ │  service/    CoreServerService (foreground), quota, terminal, config sync    │
+ │  gateway/    SystemGatewayServer — loopback JSON API on 127.0.0.1:45161      │
+ │  executor/   EngineExecutor — runs commands inside the userspace            │
+ │  install/    BootstrapInstaller, CoreUpdateManager, CoreBinaryPatcher       │
+ │  oauth/      Google OAuth 2.0 + PKCE, multi-account store                   │
+ └────────────────────────────────────────────────────────────────────────────┘
+                                   │ ProcessBuilder
+ ┌───────────────────────────── filesDir/ (app-private) ──────────────────────┐
+ │  usr/       Linux prefix: bash, git, python3, pkg, overlay scripts         │
+ │  engine/    glibc runtime + patched `agy` core binary                      │
+ │  home/      HOME: .gemini config, skills, plugins, tokens                  │
+ │  .gemini/   config.json, settings.json, skills/, plugins/                  │
+ └────────────────────────────────────────────────────────────────────────────┘
+```
+
+Two pieces drive the agent side:
+
+- **`usr/bin/agy-daemon`** — Python scheduler (cron, interval, delay, file watch, GitHub polling,
+  webhook) whose pure helpers are covered by `app/src/test/python/test_scheduler.py`.
+- **`assets/overlay/patches/`** — a byte-level patch pipeline that adapts the closed-source `agy`
+  ELF for Android, where several syscalls and paths differ. `patches/spec/patch_manifest.json`
+  describes each patch; `CoreBinaryPatcher` applies them, falling back to direct byte replacement
+  if the Python pipeline is unavailable.
 
 ## Community
 

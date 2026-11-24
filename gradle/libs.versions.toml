@@ -30,6 +30,8 @@ accompanist = "0.34.0"
 coil = "2.7.0"
 maplibreAndroid = "11.5.1"
 
+junit = "4.13.2"
+
 [libraries]
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -82,6 +84,8 @@ compose-material-icons-extended = { group = "androidx.compose.material", name = 
 accompanist-swiperefresh = { group = "com.google.accompanist", name = "accompanist-swiperefresh", version.ref = "accompanist" }
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 maplibre-android-sdk = { module = "org.maplibre.gl:android-sdk", version.ref = "maplibreAndroid" }
+
+junit = { group = "junit", name = "junit", version.ref = "junit" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

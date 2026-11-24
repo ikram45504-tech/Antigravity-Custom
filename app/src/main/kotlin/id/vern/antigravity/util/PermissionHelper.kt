@@ -24,10 +24,15 @@ object PermissionHelper {
         return hasStoragePermission(context)
     }
 
+    /**
+     * Runtime (dialog-grantable) permissions only.
+     *
+     * `READ_/WRITE_EXTERNAL_STORAGE` are deliberately absent: with `minSdk = 30`
+     * they are no longer declared and are never grantable. All-files access is
+     * a separate, Settings-based grant — see [createManageStorageIntent].
+     */
     fun getRequiredRuntimePermissions(): Array<String> {
         val permissions = mutableListOf<String>()
-        permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
-        permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
         }
