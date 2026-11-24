@@ -523,7 +523,6 @@ fun MainSettingsPage(
 }
 
 @Composable
-@Composable
 fun GitHubSettingsPage(
     viewModel: AntigravityViewModel,
     onBack: () -> Unit
