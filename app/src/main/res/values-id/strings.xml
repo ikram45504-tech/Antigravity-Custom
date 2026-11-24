@@ -287,6 +287,8 @@
     <string name="chat_live_voice_paused">Mikrofon dibisukan</string>
     <string name="chat_live_voice_skip">Lewati</string>
     <string name="chat_live_voice_end">Akhiri</string>
+    <string name="chat_live_voice_only_on">Khusus Suara</string>
+    <string name="chat_live_voice_only_off">Simpan ke Chat</string>
     <string name="chat_live_voice_permission_denied">Izin mikrofon diperlukan untuk obrolan suara langsung</string>
     <string name="chat_plan_card_title">Rencana Implementasi</string>
     <string name="chat_plan_card_ready">Siap ditinjau</string>
@@ -672,16 +674,17 @@
     <string name="settings_alert_section_title">Peringatan Selesai Prompt</string>
     <string name="settings_alert_toggle_title">Notifikasi Saat Prompt Selesai</string>
     <string name="settings_alert_toggle_desc">Getar dan kirim notifikasi saat agen menyelesaikan prompt</string>
-    <string name="settings_alert_buzz_title">Getaran / Umpan Balik Haptik</string>
-    <string name="settings_alert_buzz_desc">Pola getaran saat prompt selesai</string>
-    <string name="settings_alert_sound_title">Nada Peringatan Suara</string>
-    <string name="settings_alert_sound_desc">Nada audio yang diputar saat prompt selesai</string>
-    <string name="settings_alert_sound_flute">🎵 Melodi Suling (Lembut)</string>
-    <string name="settings_alert_sound_system">🔔 Nada Bawaan Ponsel</string>
-    <string name="settings_alert_sound_custom">📱 Pilih dari Ponsel…</string>
-    <string name="settings_alert_sound_silent">🔕 Hanya Getar (Hening)</string>
-    <string name="settings_alert_preview_sound">Pratinjau Nada</string>
-    <string name="settings_alert_test_button">Uji Peringatan &amp; Getar</string>
+    <string name="settings_alert_buzz_title">Getar Saat Selesai</string>
+    <string name="settings_alert_buzz_desc">Getaran lembut saat agen selesai</string>
+    <string name="settings_alert_sound_title">Nada Notifikasi</string>
+    <string name="settings_alert_sound_desc">Nada singkat saat prompt selesai</string>
+    <string name="settings_alert_sound_simple">Dentang Sederhana (Lembut)</string>
+    <string name="settings_alert_sound_flute">Melodi Suling (Lembut)</string>
+    <string name="settings_alert_sound_system">Nada Bawaan Ponsel</string>
+    <string name="settings_alert_sound_custom">Pilih dari Ponsel…</string>
+    <string name="settings_alert_sound_silent">Hening (Tanpa Suara)</string>
+    <string name="settings_alert_preview_sound">Pratinjau</string>
+    <string name="settings_alert_test_button">Uji Notifikasi</string>
     <string name="settings_alert_test_toast">Menguji notifikasi selesai prompt &amp; getaran…</string>
 </resources>
 

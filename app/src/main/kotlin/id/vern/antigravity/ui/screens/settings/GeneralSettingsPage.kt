@@ -535,10 +535,10 @@ fun GeneralSettingsPage(
     val voiceLanguage by viewModel.voiceLanguage.collectAsStateWithLifecycle()
     val voiceReplyInLanguage by viewModel.voiceReplyInLanguage.collectAsStateWithLifecycle()
     val voiceSpeechRate by viewModel.voiceSpeechRate.collectAsStateWithLifecycle()
+    val voiceOnlyMode by viewModel.voiceOnlyMode.collectAsStateWithLifecycle()
     var showVoiceLanguageMenu by remember { mutableStateOf(false) }
 
     var isPreviewPlaying by remember { mutableStateOf(false) }
-    var showBuzzMenu by remember { mutableStateOf(false) }
     var showSoundMenu by remember { mutableStateOf(false) }
 
     val ringtonePickerLauncher = rememberLauncherForActivityResult(
@@ -671,6 +671,7 @@ fun GeneralSettingsPage(
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                                 Spacer(modifier = Modifier.height(14.dp))
 
+                                val vibrateEnabled = completionBuzzType != PromptCompletionNotifier.BUZZ_NONE
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -689,51 +690,16 @@ fun GeneralSettingsPage(
                                         )
                                     }
 
-                                    Box {
-                                        Surface(
-                                            shape = RoundedCornerShape(8.dp),
-                                            color = MaterialTheme.colorScheme.surfaceVariant,
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .clickable { showBuzzMenu = true }
-                                        ) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                                            ) {
-                                                Text(
-                                                    text = completionBuzzType,
-                                                    style = MaterialTheme.typography.labelMedium,
-                                                    fontWeight = FontWeight.Medium
-                                                )
-                                                Spacer(modifier = Modifier.width(4.dp))
-                                                Icon(
-                                                    imageVector = Icons.Default.ArrowDropDown,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
+                                    Switch(
+                                        checked = vibrateEnabled,
+                                        onCheckedChange = { enabled ->
+                                            val nextBuzz = if (enabled) PromptCompletionNotifier.BUZZ_GENTLE else PromptCompletionNotifier.BUZZ_NONE
+                                            viewModel.setCompletionBuzzType(context, nextBuzz)
+                                            if (enabled) {
+                                                PromptCompletionNotifier.buzz(context, nextBuzz)
                                             }
                                         }
-
-                                        DropdownMenu(
-                                            expanded = showBuzzMenu,
-                                            onDismissRequest = { showBuzzMenu = false }
-                                        ) {
-                                            PromptCompletionNotifier.BUZZ_OPTIONS.forEach { opt ->
-                                                DropdownMenuItem(
-                                                    text = { Text(opt) },
-                                                    onClick = {
-                                                        viewModel.setCompletionBuzzType(context, opt)
-                                                        PromptCompletionNotifier.buzz(context, opt)
-                                                        showBuzzMenu = false
-                                                    },
-                                                    trailingIcon = if (opt == completionBuzzType) {
-                                                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                                                    } else null
-                                                )
-                                            }
-                                        }
-                                    }
+                                    )
                                 }
 
                                 Spacer(modifier = Modifier.height(14.dp))
@@ -752,13 +718,10 @@ fun GeneralSettingsPage(
                                             fontWeight = FontWeight.SemiBold
                                         )
                                         Text(
-                                            text = when (completionSoundType) {
-                                                PromptCompletionNotifier.SOUND_CUSTOM -> "Custom: $completionCustomSoundTitle"
-                                                PromptCompletionNotifier.SOUND_FLUTE -> "Soothing flute chime"
-                                                PromptCompletionNotifier.SOUND_SYSTEM -> "Phone default notification buzz"
-                                                PromptCompletionNotifier.SOUND_SILENT -> "Silent (Buzz only)"
-                                                else -> stringResource(R.string.settings_alert_sound_desc)
-                                            },
+                                            text = PromptCompletionNotifier.getToneDescription(
+                                                soundType = completionSoundType,
+                                                customSoundTitle = completionCustomSoundTitle
+                                            ),
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -777,13 +740,10 @@ fun GeneralSettingsPage(
                                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                                             ) {
                                                 Text(
-                                                    text = when (completionSoundType) {
-                                                        PromptCompletionNotifier.SOUND_FLUTE -> "🎵 Flute"
-                                                        PromptCompletionNotifier.SOUND_SYSTEM -> "🔔 Phone"
-                                                        PromptCompletionNotifier.SOUND_CUSTOM -> "📱 " + completionCustomSoundTitle.take(10)
-                                                        PromptCompletionNotifier.SOUND_SILENT -> "🔕 Silent"
-                                                        else -> completionSoundType
-                                                    },
+                                                    text = PromptCompletionNotifier.getToneShortLabel(
+                                                        soundType = completionSoundType,
+                                                        customSoundTitle = completionCustomSoundTitle
+                                                    ),
                                                     style = MaterialTheme.typography.labelMedium,
                                                     fontWeight = FontWeight.Medium
                                                 )
@@ -800,16 +760,38 @@ fun GeneralSettingsPage(
                                             expanded = showSoundMenu,
                                             onDismissRequest = { showSoundMenu = false }
                                         ) {
-                                            DropdownMenuItem(
-                                                text = { Text(stringResource(R.string.settings_alert_sound_flute)) },
-                                                onClick = {
-                                                    viewModel.setCompletionSoundType(context, PromptCompletionNotifier.SOUND_FLUTE)
-                                                    showSoundMenu = false
-                                                },
-                                                trailingIcon = if (completionSoundType == PromptCompletionNotifier.SOUND_FLUTE) {
-                                                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                                                } else null
-                                            )
+                                            PromptCompletionNotifier.BUILT_IN_TONES.forEach { tone ->
+                                                DropdownMenuItem(
+                                                    text = {
+                                                        Column {
+                                                            Text(
+                                                                text = tone.shortLabel,
+                                                                style = MaterialTheme.typography.bodyMedium,
+                                                                fontWeight = if (completionSoundType == tone.id) FontWeight.SemiBold else FontWeight.Normal
+                                                            )
+                                                            Text(
+                                                                text = tone.description,
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                            )
+                                                        }
+                                                    },
+                                                    onClick = {
+                                                        viewModel.setCompletionSoundType(context, tone.id)
+                                                        isPreviewPlaying = true
+                                                        PromptCompletionNotifier.playSoundPreview(
+                                                            context = context,
+                                                            soundType = tone.id,
+                                                            onComplete = { isPreviewPlaying = false }
+                                                        )
+                                                        showSoundMenu = false
+                                                    },
+                                                    trailingIcon = if (completionSoundType == tone.id) {
+                                                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                                    } else null
+                                                )
+                                            }
+                                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                                             DropdownMenuItem(
                                                 text = { Text(stringResource(R.string.settings_alert_sound_system)) },
                                                 onClick = {
@@ -957,6 +939,33 @@ fun GeneralSettingsPage(
                                         }
                                     }
                                 }
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                    Text(
+                                        text = "Voice-Only Mode (Hide from Chat)",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "Speak back and forth without writing voice messages into chat history.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = voiceOnlyMode,
+                                    onCheckedChange = { viewModel.setVoiceOnlyMode(context, it) }
+                                )
                             }
 
                             Spacer(modifier = Modifier.height(14.dp))

@@ -199,6 +199,8 @@ fun ChatScreen(
     val voiceLanguage by viewModel.voiceLanguage.collectAsStateWithLifecycle()
     val voiceReplyInLanguage by viewModel.voiceReplyInLanguage.collectAsStateWithLifecycle()
     val voiceSpeechRate by viewModel.voiceSpeechRate.collectAsStateWithLifecycle()
+    val voiceOnlyMode by viewModel.voiceOnlyMode.collectAsStateWithLifecycle()
+    val latestVoiceTurnResult by viewModel.latestVoiceTurnResult.collectAsStateWithLifecycle()
 
     var showMenuDropdown by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
@@ -216,21 +218,35 @@ fun ChatScreen(
     var awaitingVoiceConvId by remember { mutableStateOf<String?>(null) }
     var awaitingVoiceTurnBaselineId by remember { mutableStateOf<String?>(null) }
     var awaitingVoiceResponse by remember { mutableStateOf(false) }
+    var awaitingVoiceTurnId by remember { mutableStateOf<String?>(null) }
 
     val liveVoiceController = remember(context) {
         LiveVoiceController(context) { spokenText ->
-            val targetConvId = viewModel.activeConversationId.value
-            awaitingVoiceConvId = targetConvId
-            awaitingVoiceTurnBaselineId = if (targetConvId != null) {
-                viewModel.getMessagesForConversation(targetConvId).lastOrNull()?.id
-            } else {
-                viewModel.chatMessages.value.lastOrNull()?.id
-            }
-            awaitingVoiceResponse = true
             val voiceInstr = viewModel.voiceLanguage.value.buildVoicePromptInstruction(
                 viewModel.voiceReplyInLanguage.value
             )
-            viewModel.sendMessage(context, spokenText, voiceInstruction = voiceInstr)
+            if (viewModel.voiceOnlyMode.value) {
+                awaitingVoiceConvId = null
+                awaitingVoiceTurnBaselineId = null
+                awaitingVoiceResponse = false
+                awaitingVoiceTurnId = viewModel.sendVoiceTurn(context, spokenText, voiceInstruction = voiceInstr)
+            } else {
+                val targetConvId = viewModel.activeConversationId.value
+                awaitingVoiceTurnId = null
+                awaitingVoiceConvId = targetConvId
+                awaitingVoiceTurnBaselineId = if (targetConvId != null) {
+                    viewModel.getMessagesForConversation(targetConvId).lastOrNull()?.id
+                } else {
+                    viewModel.chatMessages.value.lastOrNull()?.id
+                }
+                awaitingVoiceResponse = true
+                viewModel.sendMessage(
+                    context,
+                    spokenText,
+                    voiceInstruction = voiceInstr,
+                    suppressCompletionNotification = true
+                )
+            }
         }
     }
     val liveVoiceState by liveVoiceController.state.collectAsStateWithLifecycle()
@@ -275,6 +291,8 @@ fun ChatScreen(
         if (liveVoiceState.active) {
             awaitingVoiceResponse = false
             awaitingVoiceConvId = null
+            awaitingVoiceTurnId = null
+            viewModel.cancelVoiceTurn()
             liveVoiceController.stop()
         } else {
             val hasMicPerm = ContextCompat.checkSelfPermission(
@@ -328,6 +346,22 @@ fun ChatScreen(
             liveVoiceController.onAssistantCompleted(
                 markdown = latestAssistant.content,
                 isSuccess = latestAssistant.status == MessageStatus.SENT
+            )
+        }
+    }
+
+    LaunchedEffect(latestVoiceTurnResult, liveVoiceState.active, awaitingVoiceTurnId) {
+        if (!liveVoiceState.active) {
+            awaitingVoiceTurnId = null
+            return@LaunchedEffect
+        }
+        val expectedId = awaitingVoiceTurnId ?: return@LaunchedEffect
+        val result = latestVoiceTurnResult ?: return@LaunchedEffect
+        if (result.turnId == expectedId) {
+            awaitingVoiceTurnId = null
+            liveVoiceController.onAssistantCompleted(
+                markdown = result.responseText,
+                isSuccess = result.isSuccess
             )
         }
     }
@@ -1825,7 +1859,12 @@ fun ChatScreen(
                             liveVoiceController.onTurnStarted()
                             voiceLanguage.buildVoicePromptInstruction(voiceReplyInLanguage)
                         } else null
-                        viewModel.sendMessage(context, text, voiceInstruction = voiceInstr)
+                        viewModel.sendMessage(
+                            context,
+                            text,
+                            voiceInstruction = voiceInstr,
+                            suppressCompletionNotification = liveVoiceState.active
+                        )
                         scope.launch {
                             kotlinx.coroutines.delay(60)
                             runCatching {
@@ -1864,6 +1903,8 @@ fun ChatScreen(
                     onVoiceLanguageChange = { lang -> viewModel.setVoiceLanguage(context, lang) },
                     onToggleVoiceReplyInLanguage = { enabled -> viewModel.setVoiceReplyInLanguage(context, enabled) },
                     onVoiceSpeechRateChange = { rate -> viewModel.setVoiceSpeechRate(context, rate) },
+                    voiceOnlyMode = voiceOnlyMode,
+                    onToggleVoiceOnlyMode = { enabled -> viewModel.setVoiceOnlyMode(context, enabled) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(

@@ -714,6 +714,39 @@ object BootstrapInstaller {
         }
     }
 
+    fun patchGitShellPath(prefix: File): Boolean {
+        val target = "/data/data/com.termux/files/usr/bin/sh\u0000".toByteArray(Charsets.US_ASCII)
+        val sysSh = "/system/bin/sh\u0000".toByteArray(Charsets.US_ASCII)
+        if (sysSh.size > target.size) return false
+        val replacement = ByteArray(target.size)
+        System.arraycopy(sysSh, 0, replacement, 0, sysSh.size)
+
+        val candidates = buildList {
+            add(File(prefix, "bin/git"))
+            val gitCore = File(prefix, "libexec/git-core")
+            if (gitCore.isDirectory) {
+                gitCore.listFiles()?.forEach { add(it) }
+            }
+        }
+
+        var anyPatched = false
+        for (file in candidates) {
+            try {
+                if (!file.isFile || java.nio.file.Files.isSymbolicLink(file.toPath())) continue
+                if (patchFileInPlace(file, target, replacement, replaceAll = true)) {
+                    file.setReadable(true, false)
+                    file.setExecutable(true, false)
+                    runCatching { Os.chmod(file.absolutePath, 493) }
+                    anyPatched = true
+                    runCatching { Log.i(TAG, "Patched SHELL_PATH in ${file.name} to /system/bin/sh") }
+                }
+            } catch (e: Exception) {
+                runCatching { Log.w(TAG, "Failed patching ${file.absolutePath}: ${e.message}") }
+            }
+        }
+        return anyPatched
+    }
+
     private fun patchFileInPlace(file: File, target: ByteArray, replacement: ByteArray, replaceAll: Boolean): Boolean {
         if (target.isEmpty() || replacement.size != target.size) return false
         var patched = false
@@ -770,6 +803,7 @@ object BootstrapInstaller {
         createAgyWrapper(filesDir, prefix, engine)
 
         patchGlibcResolvConf(context, engine)
+        patchGitShellPath(prefix)
 
         listOf(
             File(engine, "bin/agy"),

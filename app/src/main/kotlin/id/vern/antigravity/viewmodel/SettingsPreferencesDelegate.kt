@@ -103,10 +103,10 @@ class SettingsPreferencesDelegate {
     private val mutableCompletionNotificationEnabled = MutableStateFlow(true)
     val completionNotificationEnabled: StateFlow<Boolean> = mutableCompletionNotificationEnabled.asStateFlow()
 
-    private val mutableCompletionBuzzType = MutableStateFlow(id.vern.antigravity.service.PromptCompletionNotifier.BUZZ_DEFAULT)
+    private val mutableCompletionBuzzType = MutableStateFlow(id.vern.antigravity.service.PromptCompletionNotifier.BUZZ_GENTLE)
     val completionBuzzType: StateFlow<String> = mutableCompletionBuzzType.asStateFlow()
 
-    private val mutableCompletionSoundType = MutableStateFlow(id.vern.antigravity.service.PromptCompletionNotifier.SOUND_FLUTE)
+    private val mutableCompletionSoundType = MutableStateFlow(id.vern.antigravity.service.PromptCompletionNotifier.SOUND_SIMPLE)
     val completionSoundType: StateFlow<String> = mutableCompletionSoundType.asStateFlow()
 
     private val mutableCompletionCustomSoundUri = MutableStateFlow<String?>(null)
@@ -123,6 +123,9 @@ class SettingsPreferencesDelegate {
 
     private val mutableVoiceSpeechRate = MutableStateFlow(0.95f)
     val voiceSpeechRate: StateFlow<Float> = mutableVoiceSpeechRate.asStateFlow()
+
+    private val mutableVoiceOnlyMode = MutableStateFlow(true)
+    val voiceOnlyMode: StateFlow<Boolean> = mutableVoiceOnlyMode.asStateFlow()
 
     fun loadPreferences(
         context: Context,
@@ -154,8 +157,8 @@ class SettingsPreferencesDelegate {
         val browserJs = prefs.getString(AntigravityViewModel.KEY_BROWSER_JS_POLICY, "Request Review") ?: "Request Review"
         val creditOverages = prefs.getBoolean(AntigravityViewModel.KEY_ENABLE_CREDIT_OVERAGES, false)
         val notifEnabled = prefs.getBoolean(AntigravityViewModel.KEY_COMPLETION_NOTIFICATION_ENABLED, true)
-        val buzzType = prefs.getString(AntigravityViewModel.KEY_COMPLETION_BUZZ_TYPE, id.vern.antigravity.service.PromptCompletionNotifier.BUZZ_DEFAULT) ?: id.vern.antigravity.service.PromptCompletionNotifier.BUZZ_DEFAULT
-        val soundType = prefs.getString(AntigravityViewModel.KEY_COMPLETION_SOUND_TYPE, id.vern.antigravity.service.PromptCompletionNotifier.SOUND_FLUTE) ?: id.vern.antigravity.service.PromptCompletionNotifier.SOUND_FLUTE
+        val buzzType = prefs.getString(AntigravityViewModel.KEY_COMPLETION_BUZZ_TYPE, id.vern.antigravity.service.PromptCompletionNotifier.BUZZ_GENTLE) ?: id.vern.antigravity.service.PromptCompletionNotifier.BUZZ_GENTLE
+        val soundType = prefs.getString(AntigravityViewModel.KEY_COMPLETION_SOUND_TYPE, id.vern.antigravity.service.PromptCompletionNotifier.SOUND_SIMPLE) ?: id.vern.antigravity.service.PromptCompletionNotifier.SOUND_SIMPLE
         val customUri = prefs.getString(AntigravityViewModel.KEY_COMPLETION_CUSTOM_SOUND_URI, null)
         val customTitle = prefs.getString(AntigravityViewModel.KEY_COMPLETION_CUSTOM_SOUND_TITLE, "Phone Default") ?: "Phone Default"
 
@@ -169,6 +172,7 @@ class SettingsPreferencesDelegate {
         mutableVoiceLanguage.value = id.vern.antigravity.voice.VoiceLanguage.fromKey(savedVoiceLang)
         mutableVoiceReplyInLanguage.value = prefs.getBoolean(AntigravityViewModel.KEY_VOICE_REPLY_IN_LANGUAGE, true)
         mutableVoiceSpeechRate.value = prefs.getFloat(AntigravityViewModel.KEY_VOICE_SPEECH_RATE, 0.95f).coerceIn(0.6f, 1.6f)
+        mutableVoiceOnlyMode.value = prefs.getBoolean(AntigravityViewModel.KEY_VOICE_ONLY_MODE, true)
 
         mutableAppearanceConfig.value = AppearanceConfig(
             themeMode = themeMode,
@@ -512,6 +516,13 @@ class SettingsPreferencesDelegate {
         val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putFloat(AntigravityViewModel.KEY_VOICE_SPEECH_RATE, clamped).apply()
         onLog("Voice", "Voice speech rate set to: ${clamped}x")
+    }
+
+    fun setVoiceOnlyMode(context: Context, enabled: Boolean, onLog: (String, String) -> Unit) {
+        mutableVoiceOnlyMode.value = enabled
+        val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(AntigravityViewModel.KEY_VOICE_ONLY_MODE, enabled).apply()
+        onLog("Voice", "Voice-only mode set to: $enabled")
     }
 
     fun refreshPermissions(context: Context, scope: CoroutineScope) {

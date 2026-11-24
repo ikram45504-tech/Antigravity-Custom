@@ -21,8 +21,26 @@ import id.vern.antigravity.viewmodel.AntigravityViewModel
 
 object PromptCompletionNotifier {
 
+    data class BuiltInTone(
+        val id: String,
+        val shortLabel: String,
+        val description: String,
+        val rawResId: Int
+    )
+
     const val NOTIFICATION_ID = 2002
-    private const val CHANNEL_BASE_ID = "agy_prompt_completion"
+    private const val CHANNEL_BASE_ID = "agy_prompt_completion_v2"
+
+    const val SOUND_SIMPLE = "Simple Chime"
+    const val SOUND_CRYSTAL_DROP = "Crystal Drop"
+    const val SOUND_SOFT_MARIMBA = "Soft Marimba"
+    const val SOUND_CALM_BELL = "Calm Bell"
+    const val SOUND_BUBBLE_POP = "Bubble Pop"
+    const val SOUND_AMBER_HARP = "Amber Harp"
+    const val SOUND_SKY_PING = "Sky Ping"
+    const val SOUND_VELVET_TAP = "Velvet Tap"
+    const val SOUND_SPARKLE_PLUCK = "Sparkle Pluck"
+    const val SOUND_ZEN_CHIME = "Zen Chime"
 
     const val SOUND_FLUTE = "Flute Chime"
     const val SOUND_SYSTEM = "Mobile Default"
@@ -35,10 +53,45 @@ object PromptCompletionNotifier {
     const val BUZZ_LONG = "Long Buzz"
     const val BUZZ_NONE = "Off"
 
-    val SOUND_OPTIONS = listOf(SOUND_FLUTE, SOUND_SYSTEM, SOUND_CUSTOM, SOUND_SILENT)
-    val BUZZ_OPTIONS = listOf(BUZZ_DEFAULT, BUZZ_DOUBLE, BUZZ_GENTLE, BUZZ_LONG, BUZZ_NONE)
+    val BUILT_IN_TONES: List<BuiltInTone> = listOf(
+        BuiltInTone(SOUND_SIMPLE, "Simple Chime", "Warm soft two-note chime", R.raw.simple_chime),
+        BuiltInTone(SOUND_CRYSTAL_DROP, "Crystal Drop", "Bright glassy droplet ping", R.raw.tone_crystal_drop),
+        BuiltInTone(SOUND_SOFT_MARIMBA, "Soft Marimba", "Gentle woody three-tap", R.raw.tone_soft_marimba),
+        BuiltInTone(SOUND_CALM_BELL, "Calm Bell", "Pure harmonic shimmer bell", R.raw.tone_calm_bell),
+        BuiltInTone(SOUND_BUBBLE_POP, "Bubble Pop", "Quick crisp upward pop", R.raw.tone_bubble_pop),
+        BuiltInTone(SOUND_AMBER_HARP, "Amber Harp", "Soft warm harp arpeggio", R.raw.tone_amber_harp),
+        BuiltInTone(SOUND_SKY_PING, "Sky Ping", "Clean modern chime ping", R.raw.tone_sky_ping),
+        BuiltInTone(SOUND_VELVET_TAP, "Velvet Tap", "Low subtle cozy two-tap", R.raw.tone_velvet_tap),
+        BuiltInTone(SOUND_SPARKLE_PLUCK, "Sparkle Pluck", "Crisp bright rising pluck", R.raw.tone_sparkle_pluck),
+        BuiltInTone(SOUND_ZEN_CHIME, "Zen Chime", "Serene calm fifth chime", R.raw.tone_zen_chime)
+    )
+
+    val SOUND_OPTIONS = BUILT_IN_TONES.map { it.id } + listOf(SOUND_SYSTEM, SOUND_CUSTOM, SOUND_SILENT)
+    val BUZZ_OPTIONS = listOf(BUZZ_GENTLE, BUZZ_DOUBLE, BUZZ_NONE)
 
     private var activePreviewPlayer: MediaPlayer? = null
+
+    fun getToneShortLabel(soundType: String, customSoundTitle: String = "Custom"): String {
+        BUILT_IN_TONES.firstOrNull { it.id == soundType }?.let { return it.shortLabel }
+        return when (soundType) {
+            SOUND_FLUTE -> "Flute"
+            SOUND_SYSTEM -> "Phone"
+            SOUND_CUSTOM -> customSoundTitle.take(12)
+            SOUND_SILENT -> "Silent"
+            else -> soundType
+        }
+    }
+
+    fun getToneDescription(soundType: String, customSoundTitle: String = "Custom"): String {
+        BUILT_IN_TONES.firstOrNull { it.id == soundType }?.let { return it.description }
+        return when (soundType) {
+            SOUND_FLUTE -> "Soft flute chime"
+            SOUND_SYSTEM -> "Phone default notification tone"
+            SOUND_CUSTOM -> "Custom: $customSoundTitle"
+            SOUND_SILENT -> "Silent (No sound)"
+            else -> "Short alert tone"
+        }
+    }
 
     fun getVibrationPattern(buzzType: String): LongArray? {
         return when (buzzType) {
@@ -52,6 +105,9 @@ object PromptCompletionNotifier {
     }
 
     fun getSoundUri(context: Context, soundType: String, customUriString: String? = null): Uri? {
+        BUILT_IN_TONES.firstOrNull { it.id == soundType }?.let { tone ->
+            return Uri.parse("android.resource://${context.packageName}/${tone.rawResId}")
+        }
         return when (soundType) {
             SOUND_FLUTE -> {
                 Uri.parse("android.resource://${context.packageName}/${R.raw.flute_chime}")
@@ -72,7 +128,7 @@ object PromptCompletionNotifier {
             }
             SOUND_SILENT -> null
             else -> {
-                Uri.parse("android.resource://${context.packageName}/${R.raw.flute_chime}")
+                Uri.parse("android.resource://${context.packageName}/${R.raw.simple_chime}")
             }
         }
     }
@@ -164,7 +220,7 @@ object PromptCompletionNotifier {
     ) {
         stopSoundPreview()
         if (soundType == SOUND_SILENT) {
-            buzz(context, BUZZ_DEFAULT)
+            buzz(context, BUZZ_GENTLE)
             onComplete?.invoke()
             return
         }
@@ -238,11 +294,13 @@ object PromptCompletionNotifier {
         val enabled = prefs.getBoolean(AntigravityViewModel.KEY_COMPLETION_NOTIFICATION_ENABLED, true)
         if (!enabled && !isTest) return
 
-        val buzzType = prefs.getString(AntigravityViewModel.KEY_COMPLETION_BUZZ_TYPE, BUZZ_DEFAULT) ?: BUZZ_DEFAULT
-        val soundType = prefs.getString(AntigravityViewModel.KEY_COMPLETION_SOUND_TYPE, SOUND_FLUTE) ?: SOUND_FLUTE
+        val buzzType = prefs.getString(AntigravityViewModel.KEY_COMPLETION_BUZZ_TYPE, BUZZ_GENTLE) ?: BUZZ_GENTLE
+        val soundType = prefs.getString(AntigravityViewModel.KEY_COMPLETION_SOUND_TYPE, SOUND_SIMPLE) ?: SOUND_SIMPLE
         val customUri = prefs.getString(AntigravityViewModel.KEY_COMPLETION_CUSTOM_SOUND_URI, null)
 
-        buzz(context, buzzType)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            buzz(context, buzzType)
+        }
 
         val channelId = ensureNotificationChannel(context, soundType, buzzType, customUri)
 

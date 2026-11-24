@@ -112,6 +112,12 @@ data class TurnFileChanges(
     val files: List<ChangedFileDetail> = emptyList()
 )
 
+data class VoiceTurnResult(
+    val turnId: String,
+    val responseText: String,
+    val isSuccess: Boolean
+)
+
 data class ChatMessage(
     val id: String = UUID.randomUUID().toString(),
     val role: MessageRole,

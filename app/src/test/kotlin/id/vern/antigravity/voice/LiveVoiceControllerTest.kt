@@ -1,5 +1,6 @@
 package id.vern.antigravity.voice
 
+import id.vern.antigravity.data.VoiceTurnResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -52,5 +53,13 @@ class LiveVoiceControllerTest {
         val urduInstruction = VoiceLanguage.URDU_PK.buildVoicePromptInstruction(replyInVoiceLanguage = true)
         assertTrue(urduInstruction?.contains("Urdu") == true)
         assertEquals(null, VoiceLanguage.URDU_PK.buildVoicePromptInstruction(replyInVoiceLanguage = false))
+    }
+
+    @Test
+    fun `VoiceTurnResult captures ephemeral voice turn payload`() {
+        val result = VoiceTurnResult(turnId = "t-1", responseText = "سلام", isSuccess = true)
+        assertEquals("t-1", result.turnId)
+        assertEquals("سلام", result.responseText)
+        assertTrue(result.isSuccess)
     }
 }

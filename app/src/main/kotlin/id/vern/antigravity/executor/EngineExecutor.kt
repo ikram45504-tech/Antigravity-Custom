@@ -677,6 +677,8 @@ object EngineExecutor {
                 }
             }
 
+            id.vern.antigravity.install.BootstrapInstaller.patchGitShellPath(prefix)
+
             val resolvFile = File(filesDir, "resolv.conf")
             if (!resolvFile.exists() || resolvFile.length() == 0L) {
                 resolvFile.writeText("nameserver 8.8.8.8\nnameserver 1.1.1.1\nnameserver 8.8.4.4\n", Charsets.UTF_8)

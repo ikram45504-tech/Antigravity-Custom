@@ -31,6 +31,7 @@ import id.vern.antigravity.data.ChangedFileItem
 import id.vern.antigravity.data.OpenTab
 import id.vern.antigravity.data.ArtifactFileItem
 import id.vern.antigravity.data.TurnFileChanges
+import id.vern.antigravity.data.VoiceTurnResult
 import id.vern.antigravity.data.EngineStatus
 import id.vern.antigravity.data.ExecutionLogEntry
 import id.vern.antigravity.data.MessageRole
@@ -210,6 +211,8 @@ class AntigravityViewModel : ViewModel() {
         const val KEY_VOICE_LANGUAGE = "ag_voice_language"
         const val KEY_VOICE_REPLY_IN_LANGUAGE = "ag_voice_reply_in_language"
         const val KEY_VOICE_SPEECH_RATE = "ag_voice_speech_rate"
+        const val KEY_VOICE_ONLY_MODE = "ag_voice_only_mode"
+        const val VOICE_ONLY_CONV_ID = "__voice_only__"
         const val KEY_USER_PROJECTS = "ag_user_projects"
         const val KEY_CONVERSATION_HISTORY = "ag_conversation_history"
         const val KEY_LAST_ACTIVE_CONV_ID = "ag_last_active_conv_id"
@@ -260,6 +263,9 @@ class AntigravityViewModel : ViewModel() {
     val voiceLanguage: StateFlow<id.vern.antigravity.voice.VoiceLanguage> = settingsPreferencesDelegate.voiceLanguage
     val voiceReplyInLanguage: StateFlow<Boolean> = settingsPreferencesDelegate.voiceReplyInLanguage
     val voiceSpeechRate: StateFlow<Float> = settingsPreferencesDelegate.voiceSpeechRate
+    val voiceOnlyMode: StateFlow<Boolean> = settingsPreferencesDelegate.voiceOnlyMode
+    private val mutableLatestVoiceTurnResult = MutableStateFlow<VoiceTurnResult?>(null)
+    val latestVoiceTurnResult: StateFlow<VoiceTurnResult?> = mutableLatestVoiceTurnResult.asStateFlow()
     val permissionState: StateFlow<PermissionGrantsState> = settingsPreferencesDelegate.permissionState
     val installedRulesList: StateFlow<List<RuleItem>> = settingsPreferencesDelegate.installedRulesList
     val mcpServers: StateFlow<List<McpServerItem>> = settingsPreferencesDelegate.mcpServers
@@ -683,6 +689,9 @@ class AntigravityViewModel : ViewModel() {
 
     fun setVoiceSpeechRate(context: Context, rate: Float) =
         settingsPreferencesDelegate.setVoiceSpeechRate(context, rate, ::addLog)
+
+    fun setVoiceOnlyMode(context: Context, enabled: Boolean) =
+        settingsPreferencesDelegate.setVoiceOnlyMode(context, enabled, ::addLog)
 
     fun testPromptCompletionAlert(context: Context) {
         id.vern.antigravity.service.PromptCompletionNotifier.notifyPromptCompleted(
@@ -1650,7 +1659,8 @@ class AntigravityViewModel : ViewModel() {
         context: Context,
         content: String,
         attachments: List<AttachedFile> = emptyList(),
-        voiceInstruction: String? = null
+        voiceInstruction: String? = null,
+        suppressCompletionNotification: Boolean = false
     ) {
         val currentAttachments = if (attachments.isNotEmpty()) attachments else mutableAttachedFiles.value
         if (content.isBlank() && currentAttachments.isEmpty()) return
@@ -1686,7 +1696,57 @@ class AntigravityViewModel : ViewModel() {
             conversationManagerDelegate.setActiveConversationIdDirect(convId)
         }
         mutableAttachedFiles.value = emptyList()
-        sendMessageForConversation(context, convId, content, currentAttachments, voiceInstruction)
+        sendMessageForConversation(context, convId, content, currentAttachments, voiceInstruction, suppressCompletionNotification)
+    }
+
+    /**
+     * Runs an ephemeral voice-only turn without writing user or assistant messages into chat history.
+     */
+    fun sendVoiceTurn(
+        context: Context,
+        content: String,
+        voiceInstruction: String? = null
+    ): String? {
+        val trimmed = content.trim()
+        if (trimmed.isBlank()) return null
+
+        val turnId = UUID.randomUUID().toString()
+        val isShellCommand = trimmed.startsWith("!") || trimmed.startsWith("$ ")
+        addLog("Voice", "Voice-only prompt: ${trimmed.take(150)}")
+
+        if (!isShellCommand && !OAuthManager.hasToken(context)) {
+            authDelegate.showGoogleSignInDialog()
+            mutableLatestVoiceTurnResult.value = VoiceTurnResult(
+                turnId = turnId,
+                responseText = context.getString(R.string.chat_auth_required_error),
+                isSuccess = false
+            )
+            return turnId
+        }
+
+        executeAiTurn(
+            context = context,
+            prompt = trimmed,
+            convId = VOICE_ONLY_CONV_ID,
+            attachments = emptyList(),
+            voiceInstruction = voiceInstruction,
+            ephemeralVoiceOnly = true,
+            suppressCompletionNotification = true,
+            onEphemeralResult = { response, isSuccess ->
+                mutableLatestVoiceTurnResult.value = VoiceTurnResult(
+                    turnId = turnId,
+                    responseText = response,
+                    isSuccess = isSuccess
+                )
+            }
+        )
+        return turnId
+    }
+
+    fun cancelVoiceTurn() {
+        if (VOICE_ONLY_CONV_ID in mutableExecutingConvIds.value || jobsByConv.containsKey(VOICE_ONLY_CONV_ID)) {
+            stopAiExecution(VOICE_ONLY_CONV_ID)
+        }
     }
 
     fun proceedWithPlan(context: Context, messageId: String) {
@@ -1705,7 +1765,8 @@ class AntigravityViewModel : ViewModel() {
         convId: String,
         content: String,
         currentAttachments: List<AttachedFile>,
-        voiceInstruction: String? = null
+        voiceInstruction: String? = null,
+        suppressCompletionNotification: Boolean = false
     ) {
         if (isConversationExecuting(convId)) {
             queueMessage(content, currentAttachments, convId)
@@ -1795,7 +1856,14 @@ class AntigravityViewModel : ViewModel() {
             return
         }
 
-        executeAiTurn(context, effectiveContent, convId, currentAttachments, voiceInstruction)
+        executeAiTurn(
+            context = context,
+            prompt = effectiveContent,
+            convId = convId,
+            attachments = currentAttachments,
+            voiceInstruction = voiceInstruction,
+            suppressCompletionNotification = suppressCompletionNotification
+        )
     }
 
     private val executionWakeLock = WakeLockHolder()
@@ -1822,15 +1890,17 @@ class AntigravityViewModel : ViewModel() {
         if (mutableExecutingConvIds.value.isEmpty()) {
             executionWakeLock.release()
         }
-        updateMessagesForConv(convId) { list ->
-            list.map { msg ->
-                if (msg.status == MessageStatus.SENDING) {
-                    msg.copy(
-                        status = MessageStatus.SENT,
-                        content = if (msg.content.isBlank()) "[Generation stopped by user]" else "${msg.content}\n\n*[Stopped by user]*",
-                        thinking = null
-                    )
-                } else msg
+        if (convId != VOICE_ONLY_CONV_ID) {
+            updateMessagesForConv(convId) { list ->
+                list.map { msg ->
+                    if (msg.status == MessageStatus.SENDING) {
+                        msg.copy(
+                            status = MessageStatus.SENT,
+                            content = if (msg.content.isBlank()) "[Generation stopped by user]" else "${msg.content}\n\n*[Stopped by user]*",
+                            thinking = null
+                        )
+                    } else msg
+                }
             }
         }
         syncForegroundExecutionState()
@@ -1879,7 +1949,10 @@ class AntigravityViewModel : ViewModel() {
         prompt: String,
         convId: String,
         attachments: List<AttachedFile> = emptyList(),
-        voiceInstruction: String? = null
+        voiceInstruction: String? = null,
+        ephemeralVoiceOnly: Boolean = false,
+        suppressCompletionNotification: Boolean = false,
+        onEphemeralResult: ((String, Boolean) -> Unit)? = null
     ) {
         jobsByConv.remove(convId)?.cancel()
         val job = viewModelScope.launch(Dispatchers.IO) {
@@ -1942,35 +2015,46 @@ class AntigravityViewModel : ViewModel() {
                     convId = convId,
                     attachments = attachments,
                     callbacks = callbacks,
-                    voiceInstruction = voiceInstruction
+                    voiceInstruction = voiceInstruction,
+                    ephemeralVoiceOnly = ephemeralVoiceOnly,
+                    suppressCompletionNotification = suppressCompletionNotification,
+                    onEphemeralResult = onEphemeralResult
                 )
             } catch (e: Throwable) {
                 if (e is kotlinx.coroutines.CancellationException) {
-                    updateMessagesForConv(convId) { list ->
-                        list.filter { it.role != MessageRole.ASSISTANT || it.status != MessageStatus.SENDING || it.content.isNotBlank() }
+                    if (!ephemeralVoiceOnly) {
+                        updateMessagesForConv(convId) { list ->
+                            list.filter { it.role != MessageRole.ASSISTANT || it.status != MessageStatus.SENDING || it.content.isNotBlank() }
+                        }
                     }
                 } else {
-                    updateMessagesForConv(convId) { list ->
-                        val lastSendingIdx = list.indexOfLast { it.role == MessageRole.ASSISTANT && it.status == MessageStatus.SENDING }
-                        if (lastSendingIdx >= 0) {
-                            list.mapIndexed { idx, msg ->
-                                if (idx == lastSendingIdx) {
-                                    msg.copy(
-                                        status = MessageStatus.ERROR,
-                                        content = "Execution error: ${e.message}",
-                                        thinking = null
-                                    )
-                                } else msg
-                            }
-                        } else list
+                    val errorText = "Execution error: ${e.message}"
+                    if (!ephemeralVoiceOnly) {
+                        updateMessagesForConv(convId) { list ->
+                            val lastSendingIdx = list.indexOfLast { it.role == MessageRole.ASSISTANT && it.status == MessageStatus.SENDING }
+                            if (lastSendingIdx >= 0) {
+                                list.mapIndexed { idx, msg ->
+                                    if (idx == lastSendingIdx) {
+                                        msg.copy(
+                                            status = MessageStatus.ERROR,
+                                            content = errorText,
+                                            thinking = null
+                                        )
+                                    } else msg
+                                }
+                            } else list
+                        }
                     }
-                    PromptCompletionNotifier.notifyPromptCompleted(
-                        context = context,
-                        conversationId = convId,
-                        prompt = prompt,
-                        response = "Execution error: ${e.message}",
-                        isSuccess = false
-                    )
+                    onEphemeralResult?.invoke(errorText, false)
+                    if (!suppressCompletionNotification) {
+                        PromptCompletionNotifier.notifyPromptCompleted(
+                            context = context,
+                            conversationId = convId,
+                            prompt = prompt,
+                            response = errorText,
+                            isSuccess = false
+                        )
+                    }
                 }
             } finally {
                 jobsByConv.remove(convId)
@@ -1982,13 +2066,15 @@ class AntigravityViewModel : ViewModel() {
                 }
                 mutableRunningSubagents.update { list -> list.map { it.copy(isRunning = false) } }
                 syncForegroundExecutionState()
-                val currentList = messagesByConv[convId].orEmpty()
-                conversationManagerDelegate.updateConversationHistoryDirect { list ->
-                    list.map { if (it.id == convId) it.copy(messageCount = currentList.size, timestamp = System.currentTimeMillis()) else it }
+                if (!ephemeralVoiceOnly) {
+                    val currentList = messagesByConv[convId].orEmpty()
+                    conversationManagerDelegate.updateConversationHistoryDirect { list ->
+                        list.map { if (it.id == convId) it.copy(messageCount = currentList.size, timestamp = System.currentTimeMillis()) else it }
+                    }
+                    saveConversationHistory(context)
+                    saveMessagesForConversation(context, convId, currentList)
+                    processNextQueuedMessage(context, convId)
                 }
-                saveConversationHistory(context)
-                saveMessagesForConversation(context, convId, currentList)
-                processNextQueuedMessage(context, convId)
                 refreshUserQuota(context)
             }
         }

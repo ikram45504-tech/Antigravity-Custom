@@ -24,6 +24,79 @@ data class ParsedTranscriptTurn(
 object TranscriptTurnParser {
     val transcriptFileCache = ConcurrentHashMap<String, File>()
 
+    private fun JSONObject.firstNonEmptyString(vararg keys: String): String {
+        for (key in keys) {
+            if (has(key) && !isNull(key)) {
+                val value = optString(key)
+                if (value.isNotEmpty()) return value
+            }
+        }
+        return ""
+    }
+
+    private fun countChangedLines(target: String, replacement: String): Pair<Int, Int> {
+        val oldLines = if (target.isEmpty()) emptyList() else target.split('\n')
+        val newLines = if (replacement.isEmpty()) emptyList() else replacement.split('\n')
+        if (oldLines.isEmpty() && newLines.isEmpty()) return 0 to 0
+        if (oldLines.isEmpty()) return newLines.size to 0
+        if (newLines.isEmpty()) return 0 to oldLines.size
+
+        var prefix = 0
+        val minLen = minOf(oldLines.size, newLines.size)
+        while (prefix < minLen && oldLines[prefix] == newLines[prefix]) {
+            prefix++
+        }
+        var suffix = 0
+        while (
+            suffix < (oldLines.size - prefix) &&
+            suffix < (newLines.size - prefix) &&
+            oldLines[oldLines.size - 1 - suffix] == newLines[newLines.size - 1 - suffix]
+        ) {
+            suffix++
+        }
+        val delCount = (oldLines.size - prefix - suffix).coerceAtLeast(0)
+        val addCount = (newLines.size - prefix - suffix).coerceAtLeast(0)
+        return addCount to delCount
+    }
+
+    /**
+     * Computes "+add -del" summary for file-editing tool parameters across edit_file, write_file,
+     * replace_file_content, write_to_file, and multi_replace_file_content.
+     */
+    fun computeEditStepDiff(params: JSONObject?): String? {
+        if (params == null) return null
+
+        val chunks = params.optJSONArray("ReplacementChunks") ?: params.optJSONArray("replacementChunks")
+        if (chunks != null && chunks.length() > 0) {
+            var totalAdd = 0
+            var totalDel = 0
+            for (idx in 0 until chunks.length()) {
+                val chunk = chunks.optJSONObject(idx) ?: continue
+                val t = chunk.firstNonEmptyString("TargetContent", "Target", "targetContent", "target")
+                val r = chunk.firstNonEmptyString("ReplacementContent", "Replacement", "replacementContent", "replacement")
+                val (add, del) = countChangedLines(t, r)
+                totalAdd += add
+                totalDel += del
+            }
+            return if (totalAdd > 0 || totalDel > 0) "+$totalAdd -$totalDel" else null
+        }
+
+        val targetContent = params.firstNonEmptyString("TargetContent", "Target", "targetContent", "target")
+        val replacementContent = params.firstNonEmptyString(
+            "ReplacementContent",
+            "Replacement",
+            "CodeContent",
+            "Content",
+            "replacementContent",
+            "replacement",
+            "codeContent",
+            "content"
+        )
+        if (targetContent.isEmpty() && replacementContent.isEmpty()) return null
+        val (addCount, delCount) = countChangedLines(targetContent, replacementContent)
+        return "+$addCount -$delCount"
+    }
+
     fun findActiveTranscriptFile(context: Context, cliConvId: String?): File? {
         if (!cliConvId.isNullOrBlank()) {
             transcriptFileCache[cliConvId]?.let { cached ->
@@ -243,20 +316,16 @@ object TranscriptTurnParser {
                                         )
                                     )
                                 }
-                                "write_to_file", "replace_file_content" -> {
+                                "write_file", "write_to_file", "edit_file", "replace_file_content", "multi_replace_file_content" -> {
                                     val path = extractPathFromParams(args)
                                     val fileName = extractFileNameFromPath(path, fallback = "file")
-                                    val targetContent = args?.optString("TargetContent") ?: ""
-                                    val replacementContent = args?.optString("ReplacementContent") ?: args?.optString("CodeContent") ?: ""
-                                    val delCount = if (targetContent.isNotBlank()) targetContent.count { it == '\n' } + 1 else 0
-                                    val addCount = if (replacementContent.isNotBlank()) replacementContent.count { it == '\n' } + 1 else 1
                                     steps.add(
                                         AgentExecutionStep(
                                             id = "step_${i}_tool_${t}",
                                             kind = AgentStepKind.EDITED,
                                             title = fileName,
                                             filePath = path.ifEmpty { null },
-                                            diff = "+$addCount -$delCount",
+                                            diff = computeEditStepDiff(args),
                                             isCompleted = true
                                         )
                                     )
@@ -465,20 +534,16 @@ object TranscriptTurnParser {
                                         )
                                     )
                                 }
-                                "write_to_file", "replace_file_content" -> {
+                                "write_file", "write_to_file", "edit_file", "replace_file_content", "multi_replace_file_content" -> {
                                     val path = extractPathFromParams(args)
                                     val fileName = extractFileNameFromPath(path, fallback = "file")
-                                    val targetContent = args?.optString("TargetContent") ?: ""
-                                    val replacementContent = args?.optString("ReplacementContent") ?: args?.optString("CodeContent") ?: ""
-                                    val delCount = if (targetContent.isNotBlank()) targetContent.count { it == '\n' } + 1 else 0
-                                    val addCount = if (replacementContent.isNotBlank()) replacementContent.count { it == '\n' } + 1 else 1
                                     currentAssistantSteps.add(
                                         AgentExecutionStep(
                                             id = "step_${i}_tool_${t}",
                                             kind = AgentStepKind.EDITED,
                                             title = fileName,
                                             filePath = path.ifEmpty { null },
-                                            diff = "+$addCount -$delCount",
+                                            diff = computeEditStepDiff(args),
                                             detail = nextGenericContent,
                                             isCompleted = true
                                         )

@@ -291,6 +291,8 @@
     <string name="chat_live_voice_install_tts">Install Urdu Voice</string>
     <string name="chat_live_voice_tts_missing">Urdu TTS voice data is missing on this phone. Tap Install Urdu Voice.</string>
     <string name="chat_live_voice_urdu_reply">اردو جواب</string>
+    <string name="chat_live_voice_only_on">Voice Only</string>
+    <string name="chat_live_voice_only_off">Save to Chat</string>
     <string name="chat_live_voice_speak_now">Speak naturally in Urdu or English…</string>
     <string name="chat_live_voice_permission_denied">Microphone permission is required for live voice chat</string>
     <string name="chat_plan_card_title">Implementation Plan</string>
@@ -677,16 +679,17 @@
     <string name="settings_alert_section_title">Prompt Completion Alert</string>
     <string name="settings_alert_toggle_title">Notify on Prompt Completion</string>
     <string name="settings_alert_toggle_desc">Vibrate and send a notification when the agent completes a prompt</string>
-    <string name="settings_alert_buzz_title">Buzz / Haptic Feedback</string>
-    <string name="settings_alert_buzz_desc">Vibration pattern when prompt finishes</string>
-    <string name="settings_alert_sound_title">Sound Alert Tone</string>
-    <string name="settings_alert_sound_desc">Audio chime played on prompt completion</string>
-    <string name="settings_alert_sound_flute">🎵 Flute Chime (Gentle)</string>
-    <string name="settings_alert_sound_system">🔔 Phone Default Sound</string>
-    <string name="settings_alert_sound_custom">📱 Select from Phone…</string>
-    <string name="settings_alert_sound_silent">🔕 Vibrate Only (Silent)</string>
-    <string name="settings_alert_preview_sound">Preview Sound</string>
-    <string name="settings_alert_test_button">Test Alert &amp; Buzz</string>
+    <string name="settings_alert_buzz_title">Vibrate on Completion</string>
+    <string name="settings_alert_buzz_desc">Gentle vibration when the agent finishes</string>
+    <string name="settings_alert_sound_title">Notification Tone</string>
+    <string name="settings_alert_sound_desc">Short alert tone when a prompt finishes</string>
+    <string name="settings_alert_sound_simple">Simple Chime (Soft)</string>
+    <string name="settings_alert_sound_flute">Flute Chime (Gentle)</string>
+    <string name="settings_alert_sound_system">Phone Default Sound</string>
+    <string name="settings_alert_sound_custom">Select from Phone…</string>
+    <string name="settings_alert_sound_silent">Silent (No Sound)</string>
+    <string name="settings_alert_preview_sound">Preview</string>
+    <string name="settings_alert_test_button">Test Alert</string>
     <string name="settings_alert_test_toast">Testing prompt completion notification &amp; buzz…</string>
 </resources>
 

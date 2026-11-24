@@ -56,18 +56,34 @@ class TurnExecutionDelegate {
         convId: String,
         attachments: List<AttachedFile>,
         callbacks: Callbacks,
-        voiceInstruction: String? = null
+        voiceInstruction: String? = null,
+        ephemeralVoiceOnly: Boolean = false,
+        suppressCompletionNotification: Boolean = false,
+        onEphemeralResult: ((String, Boolean) -> Unit)? = null
     ) {
+        val effectiveCallbacks = if (ephemeralVoiceOnly) {
+            object : Callbacks by callbacks {
+                override fun getMessages(convId: String): List<ChatMessage> = emptyList()
+                override fun updateMessages(
+                    convId: String,
+                    transform: (List<ChatMessage>) -> List<ChatMessage>
+                ): List<ChatMessage> = emptyList()
+            }
+        } else {
+            callbacks
+        }
         val turnStartTime = System.currentTimeMillis()
         val assistantMsgId = UUID.randomUUID().toString()
-        val initialAssistantMsg = ChatMessage(
-            id = assistantMsgId,
-            role = MessageRole.ASSISTANT,
-            content = "",
-            status = MessageStatus.SENDING,
-            thinking = null
-        )
-        callbacks.updateMessages(convId) { it + initialAssistantMsg }
+        if (!ephemeralVoiceOnly) {
+            val initialAssistantMsg = ChatMessage(
+                id = assistantMsgId,
+                role = MessageRole.ASSISTANT,
+                content = "",
+                status = MessageStatus.SENDING,
+                thinking = null
+            )
+            effectiveCallbacks.updateMessages(convId) { it + initialAssistantMsg }
+        }
 
         val currentWorkspace = callbacks.workspacePath()
         val wsDir = if (!currentWorkspace.isNullOrBlank()) File(currentWorkspace) else null
@@ -75,7 +91,7 @@ class TurnExecutionDelegate {
 
         if (prompt.startsWith("!") || prompt.startsWith("$ ")) {
             val cmd = if (prompt.startsWith("!")) prompt.substring(1).trim() else prompt.substring(2).trim()
-            callbacks.updateMessages(convId) { list ->
+            effectiveCallbacks.updateMessages(convId) { list ->
                 list.map { msg ->
                     if (msg.id == assistantMsgId) {
                         msg.copy(commandRun = cmd, thinking = "Executing command in Linux shell...")
@@ -86,7 +102,7 @@ class TurnExecutionDelegate {
             val outputSb = StringBuilder()
             val exitCode = EngineExecutor.executeCommand(context, cmd, workingDir = validWsDir) { line, _ ->
                 outputSb.append(line).append("\n")
-                callbacks.updateMessages(convId) { list ->
+                effectiveCallbacks.updateMessages(convId) { list ->
                     list.map { msg ->
                         if (msg.id == assistantMsgId) {
                             msg.copy(commandOutput = outputSb.toString())
@@ -95,7 +111,7 @@ class TurnExecutionDelegate {
                 }
             }
 
-            callbacks.updateMessages(convId) { list ->
+            effectiveCallbacks.updateMessages(convId) { list ->
                 list.map { msg ->
                     if (msg.id == assistantMsgId) {
                         msg.copy(
@@ -106,15 +122,19 @@ class TurnExecutionDelegate {
                     } else msg
                 }
             }
-            PromptCompletionNotifier.notifyPromptCompleted(
-                context = context,
-                conversationId = convId,
-                prompt = cmd,
-                response = outputSb.toString().ifBlank {
-                    if (exitCode == 0) "Command completed successfully" else "Command failed with code $exitCode"
-                },
-                isSuccess = exitCode == 0
-            )
+            val shellSummary = outputSb.toString().ifBlank {
+                if (exitCode == 0) "Command completed successfully" else "Command failed with code $exitCode"
+            }
+            onEphemeralResult?.invoke(shellSummary, exitCode == 0)
+            if (!suppressCompletionNotification) {
+                PromptCompletionNotifier.notifyPromptCompleted(
+                    context = context,
+                    conversationId = convId,
+                    prompt = cmd,
+                    response = shellSummary,
+                    isSuccess = exitCode == 0
+                )
+            }
             return
         }
 
@@ -226,7 +246,7 @@ class TurnExecutionDelegate {
                                             val liveThinking = liveParsed?.thinking
                                             val liveThoughts = liveParsed?.steps?.filter { it.kind == AgentStepKind.THOUGHT }.orEmpty()
 
-                                            callbacks.updateMessages(convId) { list ->
+                                            effectiveCallbacks.updateMessages(convId) { list ->
                                                 list.map { msg ->
                                                     if (msg.id == assistantMsgId) {
                                                         val curSteps = msg.steps
@@ -268,7 +288,7 @@ class TurnExecutionDelegate {
                                             if (thoughtText.isNotBlank()) {
                                                 TerminalSessionManager.appendAgyLine("* Thinking: ${thoughtText.replace('\n', ' ')}")
                                             }
-                                            callbacks.updateMessages(convId) { list ->
+                                            effectiveCallbacks.updateMessages(convId) { list ->
                                                 list.map { msg ->
                                                     if (msg.id == assistantMsgId) {
                                                         val curSteps = msg.steps
@@ -293,7 +313,7 @@ class TurnExecutionDelegate {
                                             if (now - lastStreamUpdateMs > 250L) {
                                                 lastStreamUpdateMs = now
                                                 val currentOutput = outputSb.toString()
-                                                callbacks.updateMessages(convId) { list ->
+                                                effectiveCallbacks.updateMessages(convId) { list ->
                                                     list.map { msg ->
                                                         if (msg.id == assistantMsgId) msg.copy(content = currentOutput) else msg
                                                     }
@@ -314,7 +334,7 @@ class TurnExecutionDelegate {
                                     val liveParsed = callbacks.parseTranscriptTurn(context, activeCliConvId)
                                     val liveThinking = liveParsed.thinking
                                     val liveTranscriptSteps = liveParsed.steps
-                                    callbacks.updateMessages(convId) { list ->
+                                    effectiveCallbacks.updateMessages(convId) { list ->
                                         list.map { msg ->
                                             if (msg.id == assistantMsgId) {
                                                 msg.copy(
@@ -335,7 +355,7 @@ class TurnExecutionDelegate {
                         if (now - lastStreamUpdateMs > 250L) {
                             lastStreamUpdateMs = now
                             val currentOutput = outputSb.toString()
-                            callbacks.updateMessages(convId) { list ->
+                            effectiveCallbacks.updateMessages(convId) { list ->
                                 list.map { msg ->
                                     if (msg.id == assistantMsgId) msg.copy(content = currentOutput) else msg
                                 }
@@ -350,7 +370,7 @@ class TurnExecutionDelegate {
                         if (now - lastStreamUpdateMs > 250L) {
                             lastStreamUpdateMs = now
                             val currentOutput = outputSb.toString()
-                            callbacks.updateMessages(convId) { list ->
+                            effectiveCallbacks.updateMessages(convId) { list ->
                                 list.map { msg ->
                                     if (msg.id == assistantMsgId) msg.copy(content = currentOutput) else msg
                                 }
@@ -362,7 +382,7 @@ class TurnExecutionDelegate {
 
             if (outputSb.isNotEmpty()) {
                 val finalCurrentOutput = outputSb.toString()
-                callbacks.updateMessages(convId) { list ->
+                effectiveCallbacks.updateMessages(convId) { list ->
                     list.map { msg ->
                         if (msg.id == assistantMsgId && msg.content != finalCurrentOutput) {
                             msg.copy(content = finalCurrentOutput)
@@ -400,9 +420,9 @@ class TurnExecutionDelegate {
 
         val elapsedSec = ((System.currentTimeMillis() - turnStartTime) / 1000).coerceAtLeast(1)
         val durText = if (elapsedSec >= 60) "${elapsedSec / 60}m" else "${elapsedSec}s"
-        val turnChanges = computeTurnFileChanges(context, callbacks.workspacePath())
+        val turnChanges = if (ephemeralVoiceOnly) null else computeTurnFileChanges(context, callbacks.workspacePath())
 
-        val currentSteps = callbacks.getMessages(convId).find { it.id == assistantMsgId }?.steps.orEmpty()
+        val currentSteps = effectiveCallbacks.getMessages(convId).find { it.id == assistantMsgId }?.steps.orEmpty()
         val finalParsed = callbacks.parseTranscriptTurn(context, activeCliConvId)
         val finalThinking = finalParsed.thinking
             ?: currentSteps.find { it.kind == AgentStepKind.THOUGHT }?.detail
@@ -472,7 +492,7 @@ class TurnExecutionDelegate {
         callbacks.addLog("Agent", "Turn completed ($durText). Output: ${finalContent.take(150)}")
         TerminalSessionManager.appendAgyLine("[AGY] Turn $currentTurn completed ($durText)")
 
-        callbacks.updateMessages(convId) { list ->
+        effectiveCallbacks.updateMessages(convId) { list ->
             list.map { msg ->
                 if (msg.id == assistantMsgId) {
                     val summaryParts = mutableListOf<String>()
@@ -497,13 +517,16 @@ class TurnExecutionDelegate {
                 } else msg
             }
         }
-        PromptCompletionNotifier.notifyPromptCompleted(
-            context = context,
-            conversationId = convId,
-            prompt = prompt,
-            response = finalContent,
-            isSuccess = exitCode == 0
-        )
+        onEphemeralResult?.invoke(finalContent, exitCode == 0)
+        if (!suppressCompletionNotification) {
+            PromptCompletionNotifier.notifyPromptCompleted(
+                context = context,
+                conversationId = convId,
+                prompt = prompt,
+                response = finalContent,
+                isSuccess = exitCode == 0
+            )
+        }
     }
 
     private fun stageAttachments(
@@ -651,20 +674,12 @@ class TurnExecutionDelegate {
                 stepDiff = null
                 stepKind = AgentStepKind.ANALYZED
             }
-            "write_file", "write_to_file", "edit_file", "replace_file_content" -> {
+            "write_file", "write_to_file", "edit_file", "replace_file_content", "multi_replace_file_content" -> {
                 val path = TranscriptTurnParser.extractPathFromParams(params)
                 stepFilePath = path.ifEmpty { null }
                 stepTitle = TranscriptTurnParser.extractFileNameFromPath(path, fallback = "file")
                 stepLines = null
-                val targetContent = params?.optString("TargetContent") ?: params?.optString("Target") ?: ""
-                val replacementContent = params?.optString("ReplacementContent")
-                    ?: params?.optString("Replacement")
-                    ?: params?.optString("CodeContent")
-                    ?: params?.optString("Content")
-                    ?: ""
-                val delCount = if (targetContent.isNotBlank()) targetContent.count { it == '\n' } + 1 else 0
-                val addCount = if (replacementContent.isNotBlank()) replacementContent.count { it == '\n' } + 1 else 1
-                stepDiff = "+$addCount -$delCount"
+                stepDiff = TranscriptTurnParser.computeEditStepDiff(params)
                 stepKind = AgentStepKind.EDITED
                 val artMeta = params?.optJSONObject("ArtifactMetadata")
                     ?: params?.optJSONObject("artifactMetadata")

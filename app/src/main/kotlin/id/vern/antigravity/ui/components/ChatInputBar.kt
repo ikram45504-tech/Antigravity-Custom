@@ -20,6 +20,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.draw.scale
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -230,6 +232,8 @@ fun ChatInputBar(
     onVoiceLanguageChange: (VoiceLanguage) -> Unit = {},
     onToggleVoiceReplyInLanguage: (Boolean) -> Unit = {},
     onVoiceSpeechRateChange: (Float) -> Unit = {},
+    voiceOnlyMode: Boolean = true,
+    onToggleVoiceOnlyMode: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -630,7 +634,9 @@ fun ChatInputBar(
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
                     ) {
                         Box {
                             Surface(
@@ -715,6 +721,26 @@ fun ChatInputBar(
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                 )
                             }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (voiceOnlyMode) {
+                                AntigravityBlue.copy(alpha = 0.16f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                            },
+                            modifier = Modifier.clickable { onToggleVoiceOnlyMode(!voiceOnlyMode) }
+                        ) {
+                            Text(
+                                text = stringResource(
+                                    if (voiceOnlyMode) R.string.chat_live_voice_only_on else R.string.chat_live_voice_only_off
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (voiceOnlyMode) AntigravityBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
                         }
 
                         Surface(
