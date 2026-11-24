@@ -51,16 +51,21 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Info
+import id.vern.antigravity.voice.LiveVoicePhase
+import id.vern.antigravity.voice.LiveVoiceUiState
 import androidx.compose.material.icons.outlined.GppMaybe
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Shield
@@ -108,7 +113,9 @@ import id.vern.antigravity.data.QueuedMessage
 import id.vern.antigravity.data.RunningTask
 import id.vern.antigravity.data.RunningSubagent
 import id.vern.antigravity.data.SlashAction
+import id.vern.antigravity.ui.theme.AntigravityAmber
 import id.vern.antigravity.ui.theme.AntigravityBlue
+import id.vern.antigravity.ui.theme.AntigravityGreen
 import id.vern.antigravity.ui.theme.AntigravityRed
 import kotlin.math.cos
 import kotlin.math.sin
@@ -207,6 +214,10 @@ fun ChatInputBar(
     onExternalInputTextConsumed: () -> Unit = {},
     securityPreset: String = "Turbo",
     onSecurityPresetChange: (String) -> Unit = {},
+    liveVoiceState: LiveVoiceUiState = LiveVoiceUiState(),
+    onToggleLiveVoice: () -> Unit = {},
+    onToggleLiveVoiceMute: () -> Unit = {},
+    onSkipLiveVoiceSpeaking: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -421,6 +432,110 @@ fun ChatInputBar(
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+
+        AnimatedVisibility(visible = liveVoiceState.active) {
+            val phaseLabel = when (liveVoiceState.phase) {
+                LiveVoicePhase.LISTENING -> stringResource(R.string.chat_live_voice_listening)
+                LiveVoicePhase.THINKING -> stringResource(R.string.chat_live_voice_thinking)
+                LiveVoicePhase.SPEAKING -> stringResource(R.string.chat_live_voice_speaking)
+                LiveVoicePhase.PAUSED -> stringResource(R.string.chat_live_voice_paused)
+                LiveVoicePhase.ERROR -> liveVoiceState.statusDetail.ifBlank { "Error" }
+                LiveVoicePhase.IDLE -> ""
+            }
+            val phaseColor = when (liveVoiceState.phase) {
+                LiveVoicePhase.LISTENING -> AntigravityBlue
+                LiveVoicePhase.SPEAKING -> AntigravityGreen
+                LiveVoicePhase.THINKING -> AntigravityAmber
+                LiveVoicePhase.PAUSED -> MaterialTheme.colorScheme.onSurfaceVariant
+                LiveVoicePhase.ERROR -> AntigravityRed
+                LiveVoicePhase.IDLE -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .border(1.dp, phaseColor.copy(alpha = 0.45f), RoundedCornerShape(16.dp)),
+                tonalElevation = 2.dp
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Icon(
+                        imageVector = when (liveVoiceState.phase) {
+                            LiveVoicePhase.SPEAKING -> Icons.Default.VolumeUp
+                            LiveVoicePhase.PAUSED -> Icons.Default.MicOff
+                            else -> Icons.Default.GraphicEq
+                        },
+                        contentDescription = null,
+                        tint = phaseColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = phaseLabel,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = phaseColor
+                        )
+                        if (liveVoiceState.partialTranscript.isNotBlank()) {
+                            Text(
+                                text = liveVoiceState.partialTranscript,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2
+                            )
+                        }
+                    }
+                    if (liveVoiceState.phase == LiveVoicePhase.SPEAKING) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier
+                                .padding(end = 6.dp)
+                                .clickable { onSkipLiveVoiceSpeaking() }
+                        ) {
+                            Text(
+                                text = stringResource(R.string.chat_live_voice_skip),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                    IconButton(
+                        onClick = onToggleLiveVoiceMute,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (liveVoiceState.isMuted) Icons.Default.MicOff else Icons.Default.Mic,
+                            contentDescription = null,
+                            tint = if (liveVoiceState.isMuted) AntigravityAmber else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = AntigravityRed.copy(alpha = 0.16f),
+                        modifier = Modifier.clickable { onToggleLiveVoice() }
+                    ) {
+                        Text(
+                            text = stringResource(R.string.chat_live_voice_end),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = AntigravityRed,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
                     }
                 }
             }
@@ -1140,6 +1255,26 @@ fun ChatInputBar(
                                 }
                             }
                         }
+                    }
+
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Box(
+                        modifier = Modifier
+                            .requiredSize(32.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (liveVoiceState.active) AntigravityBlue.copy(alpha = 0.18f)
+                                else Color.Transparent
+                            )
+                            .clickable { onToggleLiveVoice() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.GraphicEq,
+                            contentDescription = stringResource(R.string.chat_live_voice_btn),
+                            tint = if (liveVoiceState.active) AntigravityBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
 
                     Spacer(modifier = Modifier.width(4.dp))

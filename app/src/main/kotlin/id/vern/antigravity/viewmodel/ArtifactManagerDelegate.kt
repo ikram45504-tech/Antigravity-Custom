@@ -13,14 +13,25 @@ class ArtifactManagerDelegate {
     private val mutableConversationArtifacts = MutableStateFlow<List<ArtifactFileItem>>(emptyList())
     val conversationArtifacts: StateFlow<List<ArtifactFileItem>> = mutableConversationArtifacts.asStateFlow()
 
-    suspend fun refreshArtifacts(context: Context, conversationId: String? = null) = withContext(Dispatchers.IO) {
+    suspend fun refreshArtifacts(
+        context: Context,
+        conversationId: String? = null,
+        cliSessionId: String? = null
+    ) = withContext(Dispatchers.IO) {
         val results = mutableListOf<ArtifactFileItem>()
         val candidateDirs = mutableListOf<File>()
 
-        if (!conversationId.isNullOrBlank()) {
-            candidateDirs.add(File(context.filesDir, ".gemini/antigravity-app/brain/$conversationId"))
-            candidateDirs.add(File(context.filesDir, "home/.gemini/antigravity-app/brain/$conversationId"))
-        }
+        listOfNotNull(conversationId, cliSessionId)
+            .filter { it.isNotBlank() }
+            .distinct()
+            .forEach { id ->
+                candidateDirs.add(File(context.filesDir, "home/.gemini/antigravity-cli/brain/$id"))
+                candidateDirs.add(File(context.filesDir, ".gemini/antigravity-cli/brain/$id"))
+                candidateDirs.add(File(context.filesDir, ".gemini/antigravity-app/brain/$id"))
+                candidateDirs.add(File(context.filesDir, "home/.gemini/antigravity-app/brain/$id"))
+            }
+        candidateDirs.add(File(context.filesDir, "home/.gemini/antigravity-cli/brain"))
+        candidateDirs.add(File(context.filesDir, ".gemini/antigravity-cli/brain"))
         candidateDirs.add(File(context.filesDir, ".gemini/antigravity-app/brain"))
         candidateDirs.add(File(context.filesDir, "home/.gemini/antigravity-app/brain"))
 

@@ -267,11 +267,20 @@ fun parseInlineMarkdown(
     }
 }
 
+internal fun isLocalFileLink(target: String): Boolean {
+    val trimmed = target.trim()
+    if (trimmed.isEmpty()) return false
+    if (trimmed.startsWith("file://", ignoreCase = true) || trimmed.startsWith("/")) return true
+    val schemeMatch = Regex("""^([a-zA-Z][a-zA-Z0-9+.-]*):""").find(trimmed)
+    return schemeMatch == null
+}
+
 @Composable
 fun FormattedText(
     annotatedString: AnnotatedString,
     style: TextStyle,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onOpenLocalFile: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val hasLinks = remember(annotatedString) {
@@ -286,12 +295,17 @@ fun FormattedText(
             modifier = modifier,
             onClick = { offset ->
                 annotatedString.getStringAnnotations("URL", offset, offset).firstOrNull()?.let { annotation ->
-                    try {
-                        val uri = Uri.parse(annotation.item)
-                        val intent = Intent(Intent.ACTION_VIEW, uri)
-                        context.startActivity(intent)
-                    } catch (e: Exception) {
-                        Toast.makeText(context, "Cannot open: ${annotation.item}", Toast.LENGTH_SHORT).show()
+                    val target = annotation.item.trim()
+                    if (isLocalFileLink(target) && onOpenLocalFile != null) {
+                        onOpenLocalFile(target)
+                    } else {
+                        try {
+                            val uri = Uri.parse(target)
+                            val intent = Intent(Intent.ACTION_VIEW, uri)
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Cannot open: ${annotation.item}", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
             }
@@ -312,7 +326,8 @@ fun MarkdownText(
     textColor: Color = MaterialTheme.colorScheme.onSurface,
     fontSize: TextUnit = 12.sp,
     lineHeight: TextUnit = 17.sp,
-    selectable: Boolean = false
+    selectable: Boolean = false,
+    onOpenLocalFile: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val elements = if (markdown.length <= ASYNC_MARKDOWN_THRESHOLD) {
@@ -361,7 +376,8 @@ fun MarkdownText(
                                     color = textColor,
                                     lineHeight = (size.value * 1.35f).sp
                                 ),
-                                modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
+                                modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
+                                onOpenLocalFile = onOpenLocalFile
                             )
                         }
 
@@ -400,7 +416,8 @@ fun MarkdownText(
                                         lineHeight = lineHeight,
                                         color = textColor
                                     ),
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f),
+                                    onOpenLocalFile = onOpenLocalFile
                                 )
                             }
                         }
@@ -426,7 +443,8 @@ fun MarkdownText(
                                         fontSize = fontSize,
                                         lineHeight = lineHeight,
                                         color = textColor.copy(alpha = 0.85f)
-                                    )
+                                    ),
+                                    onOpenLocalFile = onOpenLocalFile
                                 )
                             }
                         }
@@ -446,7 +464,8 @@ fun MarkdownText(
                                     fontSize = fontSize,
                                     lineHeight = lineHeight,
                                     color = textColor
-                                )
+                                ),
+                                onOpenLocalFile = onOpenLocalFile
                             )
                         }
                     }

@@ -112,6 +112,8 @@ object ConversationPersistence {
                     }
                     if (msg.durationText != null) put("durationText", msg.durationText)
                     if (msg.actionSummary != null) put("actionSummary", msg.actionSummary)
+                    if (msg.planArtifactPath != null) put("planArtifactPath", msg.planArtifactPath)
+                    if (msg.requiresPlanReview) put("requiresPlanReview", true)
                     if (msg.steps.isNotEmpty()) {
                         val stepsArr = JSONArray()
                         for (s in msg.steps) {
@@ -217,7 +219,9 @@ object ConversationPersistence {
                         codeBlocks = codeBlocks,
                         durationText = if (obj.has("durationText")) obj.getString("durationText") else null,
                         actionSummary = if (obj.has("actionSummary")) obj.getString("actionSummary") else null,
-                        steps = steps
+                        steps = steps,
+                        planArtifactPath = if (obj.has("planArtifactPath")) obj.getString("planArtifactPath").ifBlank { null } else null,
+                        requiresPlanReview = obj.optBoolean("requiresPlanReview", false)
                     )
                 )
             }

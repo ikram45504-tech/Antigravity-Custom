@@ -74,8 +74,13 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SystemUpdate
+import android.Manifest
+import android.content.pm.PackageManager
 import android.widget.Toast
+import androidx.core.content.ContextCompat
+import id.vern.antigravity.data.MessageStatus
 import id.vern.antigravity.data.RunningSubagent
+import id.vern.antigravity.voice.LiveVoiceController
 import id.vern.antigravity.ui.components.AgentDetailsBottomSheet
 import id.vern.antigravity.ui.components.DialogBlurEffect
 import id.vern.antigravity.ui.components.InstallationProgressDialog
@@ -86,6 +91,7 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -104,6 +110,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.DrawerValue
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.text.style.TextOverflow
 import id.vern.antigravity.data.MessageRole
 import id.vern.antigravity.data.ProjectSortOrder
@@ -155,6 +162,8 @@ fun ChatScreen(
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     val messages by viewModel.chatMessages.collectAsStateWithLifecycle()
+    val activeConversationId by viewModel.activeConversationId.collectAsStateWithLifecycle()
+    val executingConversationIds by viewModel.executingConversationIds.collectAsStateWithLifecycle()
     val conversationTitle by viewModel.conversationTitle.collectAsStateWithLifecycle()
     val conversationHistory by viewModel.conversationHistory.collectAsStateWithLifecycle()
     val attachedFiles by viewModel.attachedFiles.collectAsStateWithLifecycle()
@@ -195,6 +204,73 @@ fun ChatScreen(
     var settingsInitialPage by remember { mutableStateOf(SettingsPage.MAIN) }
     val listState = rememberLazyListState()
     val terminalReq by viewModel.openTerminalRequest.collectAsStateWithLifecycle()
+
+    var awaitingVoiceTurnBaselineId by remember { mutableStateOf<String?>(null) }
+    var awaitingVoiceResponse by remember { mutableStateOf(false) }
+
+    val liveVoiceController = remember(context) {
+        LiveVoiceController(context) { spokenText ->
+            awaitingVoiceTurnBaselineId = viewModel.chatMessages.value.lastOrNull()?.id
+            awaitingVoiceResponse = true
+            viewModel.sendMessage(context, spokenText)
+        }
+    }
+    val liveVoiceState by liveVoiceController.state.collectAsStateWithLifecycle()
+
+    DisposableEffect(liveVoiceController) {
+        onDispose { liveVoiceController.destroy() }
+    }
+
+    val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            liveVoiceController.start()
+        } else {
+            Toast.makeText(
+                context,
+                context.getString(R.string.chat_live_voice_permission_denied),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    val toggleLiveVoice: () -> Unit = {
+        if (liveVoiceState.active) {
+            awaitingVoiceResponse = false
+            liveVoiceController.stop()
+        } else {
+            val hasMicPerm = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+            if (hasMicPerm) {
+                liveVoiceController.start()
+            } else {
+                recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+    }
+
+    LaunchedEffect(messages, isExecuting, activeConversationId, liveVoiceState.active, awaitingVoiceResponse) {
+        if (!liveVoiceState.active) {
+            awaitingVoiceResponse = false
+            return@LaunchedEffect
+        }
+        if (!awaitingVoiceResponse) return@LaunchedEffect
+        val latestAssistant = messages.lastOrNull { it.role == MessageRole.ASSISTANT }
+        if (latestAssistant != null &&
+            latestAssistant.id != awaitingVoiceTurnBaselineId &&
+            latestAssistant.status != MessageStatus.SENDING &&
+            !isExecuting
+        ) {
+            awaitingVoiceResponse = false
+            liveVoiceController.onAssistantCompleted(
+                markdown = latestAssistant.content,
+                isSuccess = latestAssistant.status == MessageStatus.SENT
+            )
+        }
+    }
 
     LaunchedEffect(terminalReq) {
         if (terminalReq != null) {
@@ -623,6 +699,14 @@ fun ChatScreen(
                                                     horizontalArrangement = Arrangement.SpaceBetween,
                                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
                                                 ) {
+                                                    if (convo.id in executingConversationIds) {
+                                                        CircularProgressIndicator(
+                                                            modifier = Modifier.size(12.dp),
+                                                            strokeWidth = 1.8.dp,
+                                                            color = AntigravityBlue
+                                                        )
+                                                        Spacer(modifier = Modifier.width(6.dp))
+                                                    }
                                                     Text(
                                                         text = convo.title,
                                                         style = MaterialTheme.typography.bodyMedium,
@@ -942,6 +1026,14 @@ fun ChatScreen(
                                                         horizontalArrangement = Arrangement.SpaceBetween,
                                                         modifier = Modifier.padding(start = 32.dp, end = 4.dp, top = 2.dp, bottom = 2.dp)
                                                     ) {
+                                                        if (c.id in executingConversationIds) {
+                                                            CircularProgressIndicator(
+                                                                modifier = Modifier.size(11.dp),
+                                                                strokeWidth = 1.6.dp,
+                                                                color = AntigravityBlue
+                                                            )
+                                                            Spacer(modifier = Modifier.width(5.dp))
+                                                        }
                                                         Text(
                                                             text = c.title,
                                                             style = MaterialTheme.typography.bodySmall,
@@ -1069,6 +1161,14 @@ fun ChatScreen(
                                                     horizontalArrangement = Arrangement.SpaceBetween,
                                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
                                                 ) {
+                                                    if (convo.id in executingConversationIds) {
+                                                        CircularProgressIndicator(
+                                                            modifier = Modifier.size(12.dp),
+                                                            strokeWidth = 1.8.dp,
+                                                            color = AntigravityBlue
+                                                        )
+                                                        Spacer(modifier = Modifier.width(6.dp))
+                                                    }
                                                     Text(
                                                         text = convo.title,
                                                         style = MaterialTheme.typography.bodyMedium,
@@ -1553,6 +1653,9 @@ fun ChatScreen(
                                             onUndoPrompt = { userMsg ->
                                                 viewModel.undoPrompt(context, userMsg)
                                             },
+                                            onProceedPlan = { msg ->
+                                                viewModel.proceedWithPlan(context, msg.id)
+                                            },
                                             isExecuting = isExecuting
                                         )
                                     }
@@ -1578,6 +1681,9 @@ fun ChatScreen(
                                                 onUndoPrompt = { userMsgToUndo ->
                                                     viewModel.undoPrompt(context, userMsgToUndo)
                                                 },
+                                                onProceedPlan = { msg ->
+                                                    viewModel.proceedWithPlan(context, msg.id)
+                                                },
                                                 isPinnedExecuting = true,
                                                 isExecuting = isExecuting
                                             )
@@ -1599,6 +1705,9 @@ fun ChatScreen(
                                             onUndoPrompt = { userMsg ->
                                                 viewModel.undoPrompt(context, userMsg)
                                             },
+                                            onProceedPlan = { msg ->
+                                                viewModel.proceedWithPlan(context, msg.id)
+                                            },
                                             isExecuting = isExecuting
                                         )
                                     }
@@ -1617,6 +1726,9 @@ fun ChatScreen(
                                             },
                                             onUndoPrompt = { userMsg ->
                                                 viewModel.undoPrompt(context, userMsg)
+                                            },
+                                            onProceedPlan = { msg ->
+                                                viewModel.proceedWithPlan(context, msg.id)
                                             },
                                             isExecuting = isExecuting
                                         )
@@ -1671,6 +1783,10 @@ fun ChatScreen(
                     onSlashMenuOpened = { viewModel.refreshCliSlashCommands(context) },
                     securityPreset = securityPreset,
                     onSecurityPresetChange = { preset -> viewModel.setSecurityPreset(context, preset) },
+                    liveVoiceState = liveVoiceState,
+                    onToggleLiveVoice = toggleLiveVoice,
+                    onToggleLiveVoiceMute = { liveVoiceController.toggleMute() },
+                    onSkipLiveVoiceSpeaking = { liveVoiceController.skipSpeaking() },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(

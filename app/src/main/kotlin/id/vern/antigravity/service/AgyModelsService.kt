@@ -241,11 +241,11 @@ object AgyModelsService {
         val stderrLines = Collections.synchronizedList(mutableListOf<String>())
         val exit = try {
             withTimeoutOrNull(QUERY_TIMEOUT_MS) {
-                EngineExecutor.executeAgy(context, args) { line, isError ->
+                EngineExecutor.executeAgy(context, args, executionKey = "models_fetch") { line, isError ->
                     if (isError) stderrLines.add(line) else stdout.appendLine(line)
                 }
             } ?: run {
-                EngineExecutor.stopAgyProcess()
+                EngineExecutor.stopAgyProcess("models_fetch")
                 -2
             }
         } catch (e: Exception) {

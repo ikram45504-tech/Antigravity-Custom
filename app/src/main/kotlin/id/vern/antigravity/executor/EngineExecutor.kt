@@ -11,6 +11,7 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStreamReader
+import java.util.concurrent.ConcurrentHashMap
 
 object EngineExecutor {
 
@@ -219,6 +220,7 @@ object EngineExecutor {
         context: Context,
         args: List<String>,
         workingDir: File? = null,
+        executionKey: String = "default",
         onOutputLine: (String, Boolean) -> Unit
     ): Int = withContext(Dispatchers.IO) {
         val filesDir = context.filesDir
@@ -353,7 +355,7 @@ object EngineExecutor {
                 env["ANTIGRAVITY_APP_DATA_DIR"] = File(homeDir, ".gemini/antigravity-cli").apply { mkdirs() }.absolutePath
                 readGatewayToken(filesDir)?.let { env["AGY_GATEWAY_TOKEN"] = it }
 
-                streamProcess(pb, onOutputLine)
+                streamProcess(pb, executionKey, onOutputLine)
             } catch (e: Exception) {
                 onOutputLine("Direct engine execution failed: ${e.message}", true)
                 -1
@@ -407,7 +409,7 @@ object EngineExecutor {
                 env["APPLICATION_ID"] = context.packageName
                 env["ANTIGRAVITY_APP_DATA_DIR"] = File(homeDir, ".gemini/antigravity-cli").apply { mkdirs() }.absolutePath
                 readGatewayToken(filesDir)?.let { env["AGY_GATEWAY_TOKEN"] = it }
-                streamProcess(pb, onOutputLine)
+                streamProcess(pb, executionKey, onOutputLine)
             } catch (e: Exception) {
                 onOutputLine("Engine wrapper execution failed: ${e.message}", true)
                 -1
@@ -418,20 +420,33 @@ object EngineExecutor {
         -1
     }
 
-    @Volatile
-    private var activeAgyProcess: Process? = null
+    private val activeAgyProcesses = ConcurrentHashMap<String, Process>()
 
-    fun isAgyRunning(): Boolean = activeAgyProcess != null
-
-    fun stopAgyProcess() {
-        try {
-            activeAgyProcess?.destroyForcibly()
-        } catch (e: Exception) {}
-        activeAgyProcess = null
+    fun isAgyRunning(executionKey: String? = null): Boolean {
+        return if (executionKey != null) activeAgyProcesses.containsKey(executionKey)
+        else activeAgyProcesses.isNotEmpty()
     }
 
-    fun writeToAgyStdin(input: String): Boolean {
-        val p = activeAgyProcess ?: return false
+    fun stopAgyProcess(executionKey: String? = null) {
+        if (executionKey != null) {
+            try {
+                activeAgyProcesses.remove(executionKey)?.destroyForcibly()
+            } catch (_: Exception) {}
+        } else {
+            for (key in activeAgyProcesses.keys.toList()) {
+                try {
+                    activeAgyProcesses.remove(key)?.destroyForcibly()
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    fun writeToAgyStdin(input: String, executionKey: String? = null): Boolean {
+        val p = if (executionKey != null) {
+            activeAgyProcesses[executionKey]
+        } else {
+            activeAgyProcesses.values.firstOrNull()
+        } ?: return false
         return try {
             p.outputStream.write((input.trim() + "\n").toByteArray(Charsets.UTF_8))
             p.outputStream.flush()
@@ -443,6 +458,7 @@ object EngineExecutor {
 
     private fun streamProcess(
         pb: ProcessBuilder,
+        executionKey: String,
         onOutputLine: (String, Boolean) -> Unit
     ): Int {
         val process = try {
@@ -451,7 +467,7 @@ object EngineExecutor {
             onOutputLine("Failed to launch process: ${e.message}", true)
             return -1
         }
-        activeAgyProcess = process
+        activeAgyProcesses[executionKey] = process
 
         try {
             val stdoutThread = Thread {
@@ -491,7 +507,7 @@ object EngineExecutor {
             try { stderrThread.join(1000) } catch (e: Exception) {}
             return exitCode
         } finally {
-            activeAgyProcess = null
+            activeAgyProcesses.remove(executionKey, process)
         }
     }
 

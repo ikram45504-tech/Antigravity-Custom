@@ -89,6 +89,7 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -290,17 +291,48 @@ class AntigravityViewModel : ViewModel() {
     private val mutableAttachedFiles = MutableStateFlow<List<AttachedFile>>(emptyList())
     val attachedFiles: StateFlow<List<AttachedFile>> = mutableAttachedFiles.asStateFlow()
 
+    private val mutableExecutingConvIds = MutableStateFlow<Set<String>>(emptySet())
+    val executingConversationIds: StateFlow<Set<String>> = mutableExecutingConvIds.asStateFlow()
+
     private val mutableIsExecuting = MutableStateFlow(false)
     val isExecuting: StateFlow<Boolean> = mutableIsExecuting.asStateFlow()
 
+    private val queuedMessagesByConv = MutableStateFlow<Map<String, List<QueuedMessage>>>(emptyMap())
     private val mutableQueuedMessages = MutableStateFlow<List<QueuedMessage>>(emptyList())
     val queuedMessages: StateFlow<List<QueuedMessage>> = mutableQueuedMessages.asStateFlow()
 
+    private val workingStatusByConv = MutableStateFlow<Map<String, String>>(emptyMap())
     private val mutableActiveWorkingStatus = MutableStateFlow<String?>(null)
     val activeWorkingStatus: StateFlow<String?> = mutableActiveWorkingStatus.asStateFlow()
 
+    private val runningTasksByConv = MutableStateFlow<Map<String, List<RunningTask>>>(emptyMap())
     private val mutableRunningTasks = MutableStateFlow<List<RunningTask>>(emptyList())
     val runningTasks: StateFlow<List<RunningTask>> = mutableRunningTasks.asStateFlow()
+
+    private val messagesByConv = ConcurrentHashMap<String, List<ChatMessage>>()
+    private val jobsByConv = ConcurrentHashMap<String, Job>()
+
+    fun isConversationExecuting(convId: String?): Boolean {
+        return !convId.isNullOrBlank() && convId in mutableExecutingConvIds.value
+    }
+
+    private fun syncForegroundExecutionState() {
+        val cid = activeConversationId.value
+        mutableIsExecuting.value = isConversationExecuting(cid)
+        mutableQueuedMessages.value = if (cid != null) queuedMessagesByConv.value[cid].orEmpty() else emptyList()
+        mutableRunningTasks.value = if (cid != null) runningTasksByConv.value[cid].orEmpty() else emptyList()
+        mutableActiveWorkingStatus.value = if (cid != null) workingStatusByConv.value[cid] else null
+    }
+
+    private fun updateMessagesForConv(convId: String, transform: (List<ChatMessage>) -> List<ChatMessage>): List<ChatMessage> {
+        val updated = messagesByConv.compute(convId) { _, existing ->
+            transform(existing ?: emptyList())
+        } ?: emptyList()
+        if (activeConversationId.value == convId) {
+            mutableChatMessages.value = updated
+        }
+        return updated
+    }
 
     private val mutableRunningSubagents = MutableStateFlow<List<RunningSubagent>>(emptyList())
     val runningSubagents: StateFlow<List<RunningSubagent>> = mutableRunningSubagents.asStateFlow()
@@ -327,7 +359,9 @@ class AntigravityViewModel : ViewModel() {
 
     fun refreshConversationArtifacts(context: Context) {
         viewModelScope.launch {
-            artifactManagerDelegate.refreshArtifacts(context, activeConversationId.value)
+            val convId = activeConversationId.value
+            val cliId = convId?.let { convIdToCliSessionId[it] }
+            artifactManagerDelegate.refreshArtifacts(context, convId, cliId)
         }
     }
 
@@ -834,9 +868,26 @@ class AntigravityViewModel : ViewModel() {
             context = context,
             scope = viewModelScope,
             onWorkspaceChange = { setWorkspacePath(context, it) },
-            onMessagesLoaded = { mutableChatMessages.value = it }
+            onMessagesLoaded = { loaded ->
+                val cid = activeConversationId.value
+                if (cid != null) {
+                    if (isConversationExecuting(cid)) {
+                        mutableChatMessages.value = messagesByConv[cid].orEmpty()
+                    } else {
+                        messagesByConv[cid] = loaded
+                        mutableChatMessages.value = loaded
+                    }
+                } else {
+                    mutableChatMessages.value = loaded
+                }
+                syncForegroundExecutionState()
+            }
         )
-    fun startNewConversation(context: Context? = null, projectPath: String? = workspacePath.value) =
+    fun startNewConversation(context: Context? = null, projectPath: String? = workspacePath.value) {
+        val prevId = activeConversationId.value
+        if (prevId != null && !isConversationExecuting(prevId)) {
+            messagesByConv[prevId] = mutableChatMessages.value
+        }
         conversationManagerDelegate.startNewConversation(
             context = context,
             projectPath = projectPath,
@@ -848,22 +899,51 @@ class AntigravityViewModel : ViewModel() {
                 mutableAttachedFiles.value = emptyList()
             }
         )
-    fun loadConversation(context: Context, summary: ConversationSummary) =
+        syncForegroundExecutionState()
+    }
+    fun loadConversation(context: Context, summary: ConversationSummary) {
+        val prevId = activeConversationId.value
+        if (prevId != null && !isConversationExecuting(prevId)) {
+            messagesByConv[prevId] = mutableChatMessages.value
+        }
+        val cachedLive = if (isConversationExecuting(summary.id)) messagesByConv[summary.id] else null
         conversationManagerDelegate.loadConversation(
             context = context,
             summary = summary,
             currentMessages = mutableChatMessages.value,
             scope = viewModelScope,
             onWorkspaceChange = { setWorkspacePath(context, it) },
-            onMessagesLoaded = { mutableChatMessages.value = it },
+            onMessagesLoaded = { loaded ->
+                if (activeConversationId.value == summary.id) {
+                    if (isConversationExecuting(summary.id)) {
+                        mutableChatMessages.value = messagesByConv[summary.id] ?: loaded
+                    } else {
+                        messagesByConv[summary.id] = loaded
+                        mutableChatMessages.value = loaded
+                    }
+                } else {
+                    messagesByConv.putIfAbsent(summary.id, loaded)
+                }
+            },
             onLog = ::addLog
         )
-    fun loadConversation(summary: ConversationSummary) =
+        if (cachedLive != null) {
+            mutableChatMessages.value = cachedLive
+        }
+        syncForegroundExecutionState()
+    }
+    fun loadConversation(summary: ConversationSummary) {
         conversationManagerDelegate.loadConversation(
             summary = summary,
             onWorkspaceChange = { projectWorkspaceDelegate.setWorkspacePathDirect(it) },
             onLog = ::addLog
         )
+        val cid = summary.id
+        if (messagesByConv.containsKey(cid)) {
+            mutableChatMessages.value = messagesByConv[cid].orEmpty()
+        }
+        syncForegroundExecutionState()
+    }
     fun renameConversation(newTitle: String, summaryId: String? = null, context: Context? = null) =
         conversationManagerDelegate.renameConversation(
             newTitle = newTitle,
@@ -875,7 +955,14 @@ class AntigravityViewModel : ViewModel() {
         )
     fun togglePinConversation(summaryId: String? = null, context: Context? = null): Boolean =
         conversationManagerDelegate.togglePinConversation(summaryId, context, ::addLog)
-    fun deleteConversation(id: String) =
+    fun deleteConversation(id: String) {
+        if (isConversationExecuting(id)) {
+            stopAiExecution(id)
+        }
+        messagesByConv.remove(id)
+        queuedMessagesByConv.update { it - id }
+        runningTasksByConv.update { it - id }
+        workingStatusByConv.update { it - id }
         conversationManagerDelegate.deleteConversation(
             context = null,
             id = id,
@@ -886,7 +973,16 @@ class AntigravityViewModel : ViewModel() {
             },
             onLog = ::addLog
         )
-    fun deleteConversation(context: Context, id: String) =
+        syncForegroundExecutionState()
+    }
+    fun deleteConversation(context: Context, id: String) {
+        if (isConversationExecuting(id)) {
+            stopAiExecution(id)
+        }
+        messagesByConv.remove(id)
+        queuedMessagesByConv.update { it - id }
+        runningTasksByConv.update { it - id }
+        workingStatusByConv.update { it - id }
         conversationManagerDelegate.deleteConversation(
             context = context,
             id = id,
@@ -897,7 +993,19 @@ class AntigravityViewModel : ViewModel() {
             },
             onLog = ::addLog
         )
-    fun deleteCurrentConversation(context: Context) =
+        syncForegroundExecutionState()
+    }
+    fun deleteCurrentConversation(context: Context) {
+        val currentId = activeConversationId.value
+        if (currentId != null && isConversationExecuting(currentId)) {
+            stopAiExecution(currentId)
+        }
+        if (currentId != null) {
+            messagesByConv.remove(currentId)
+            queuedMessagesByConv.update { it - currentId }
+            runningTasksByConv.update { it - currentId }
+            workingStatusByConv.update { it - currentId }
+        }
         conversationManagerDelegate.deleteCurrentConversation(
             context = context,
             onNextSummaryLoaded = { loadConversation(context, it) },
@@ -907,6 +1015,8 @@ class AntigravityViewModel : ViewModel() {
             },
             onLog = ::addLog
         )
+        syncForegroundExecutionState()
+    }
     fun archiveConversation(context: Context? = null) =
         conversationManagerDelegate.archiveConversation(context, mutableChatMessages.value, workspacePath.value)
 
@@ -1268,29 +1378,51 @@ class AntigravityViewModel : ViewModel() {
         mutableShowModelSelector.value = false
     }
 
-    fun queueMessage(content: String, attachments: List<AttachedFile> = emptyList()) {
+    fun queueMessage(content: String, attachments: List<AttachedFile> = emptyList(), convId: String? = activeConversationId.value) {
         if (content.isBlank() && attachments.isEmpty()) return
+        val targetConvId = convId ?: return
         val item = QueuedMessage(
             content = content.trim(),
             attachments = attachments
         )
-        mutableQueuedMessages.update { it + item }
+        queuedMessagesByConv.update { map ->
+            val current = map[targetConvId].orEmpty()
+            map + (targetConvId to (current + item))
+        }
+        syncForegroundExecutionState()
     }
 
-    fun addRunningTask(name: String, command: String): RunningTask {
+    fun addRunningTask(name: String, command: String, convId: String? = activeConversationId.value): RunningTask {
         val task = RunningTask(name = name, command = command)
-        mutableRunningTasks.update { it + task }
+        val targetConvId = convId
+        if (targetConvId != null) {
+            runningTasksByConv.update { map ->
+                map + (targetConvId to (map[targetConvId].orEmpty() + task))
+            }
+            syncForegroundExecutionState()
+        } else {
+            mutableRunningTasks.update { it + task }
+        }
         return task
     }
 
-    fun removeRunningTask(id: String) {
-        mutableRunningTasks.update { list -> list.filter { it.id != id } }
+    fun removeRunningTask(id: String, convId: String? = activeConversationId.value) {
+        if (convId != null) {
+            runningTasksByConv.update { map ->
+                val updated = map[convId].orEmpty().filter { it.id != id }
+                if (updated.isEmpty()) map - convId else map + (convId to updated)
+            }
+            syncForegroundExecutionState()
+        } else {
+            mutableRunningTasks.update { list -> list.filter { it.id != id } }
+        }
     }
 
-    fun stopRunningTask(id: String) {
-        removeRunningTask(id)
-        if (mutableRunningTasks.value.isEmpty()) {
-            stopAiExecution()
+    fun stopRunningTask(id: String, convId: String? = activeConversationId.value) {
+        removeRunningTask(id, convId)
+        val remaining = if (convId != null) runningTasksByConv.value[convId].orEmpty() else mutableRunningTasks.value
+        if (remaining.isEmpty()) {
+            stopAiExecution(convId)
         }
     }
 
@@ -1385,30 +1517,38 @@ class AntigravityViewModel : ViewModel() {
         }
     }
 
-    fun removeQueuedMessage(id: String) {
-        mutableQueuedMessages.update { list -> list.filter { it.id != id } }
+    fun removeQueuedMessage(id: String, convId: String? = activeConversationId.value) {
+        val targetConvId = convId ?: return
+        queuedMessagesByConv.update { map ->
+            val updated = map[targetConvId].orEmpty().filter { it.id != id }
+            if (updated.isEmpty()) map - targetConvId else map + (targetConvId to updated)
+        }
+        syncForegroundExecutionState()
     }
 
-    fun editQueuedMessage(id: String): QueuedMessage? {
-        val item = mutableQueuedMessages.value.find { it.id == id } ?: return null
-        removeQueuedMessage(id)
+    fun editQueuedMessage(id: String, convId: String? = activeConversationId.value): QueuedMessage? {
+        val targetConvId = convId ?: return null
+        val item = queuedMessagesByConv.value[targetConvId].orEmpty().find { it.id == id } ?: return null
+        removeQueuedMessage(id, targetConvId)
         return item
     }
 
-    fun processQueuedMessageNow(context: Context, id: String) {
-        val item = mutableQueuedMessages.value.find { it.id == id } ?: return
-        removeQueuedMessage(id)
-        if (mutableIsExecuting.value) {
-            stopAiExecution()
+    fun processQueuedMessageNow(context: Context, id: String, convId: String? = activeConversationId.value) {
+        val targetConvId = convId ?: return
+        val item = queuedMessagesByConv.value[targetConvId].orEmpty().find { it.id == id } ?: return
+        removeQueuedMessage(id, targetConvId)
+        if (isConversationExecuting(targetConvId)) {
+            stopAiExecution(targetConvId)
         }
-        sendMessage(context, item.content, item.attachments)
+        sendMessageForConversation(context, targetConvId, item.content, item.attachments)
     }
 
-    fun processNextQueuedMessage(context: Context) {
-        if (mutableIsExecuting.value) return
-        val next = mutableQueuedMessages.value.firstOrNull() ?: return
-        removeQueuedMessage(next.id)
-        sendMessage(context, next.content, next.attachments)
+    fun processNextQueuedMessage(context: Context, convId: String? = activeConversationId.value) {
+        val targetConvId = convId ?: return
+        if (isConversationExecuting(targetConvId)) return
+        val next = queuedMessagesByConv.value[targetConvId].orEmpty().firstOrNull() ?: return
+        removeQueuedMessage(next.id, targetConvId)
+        sendMessageForConversation(context, targetConvId, next.content, next.attachments)
     }
 
     fun getWorkspaceFiles(query: String = ""): List<String> {
@@ -1493,6 +1633,7 @@ class AntigravityViewModel : ViewModel() {
             val convId = activeConversationId.value
             mutableChatMessages.value = emptyList()
             if (convId != null) {
+                messagesByConv[convId] = emptyList()
                 saveMessagesForConversation(context, convId, emptyList())
                 conversationManagerDelegate.updateConversationHistoryDirect { list ->
                     list.map { if (it.id == convId) it.copy(messageCount = 0) else it }
@@ -1502,28 +1643,69 @@ class AntigravityViewModel : ViewModel() {
             return
         }
 
-        if (mutableIsExecuting.value) {
+        val existingConvId = activeConversationId.value
+        if (existingConvId != null && isConversationExecuting(existingConvId)) {
             if (queuedMessagesMode.value.equals("Send Immediately", ignoreCase = true)) {
-                stopAiExecution()
+                stopAiExecution(existingConvId)
             } else {
-                queueMessage(content, currentAttachments)
+                queueMessage(content, currentAttachments, existingConvId)
                 mutableAttachedFiles.value = emptyList()
                 return
             }
         }
 
-        var convId = activeConversationId.value
-        val isFirstMessage = (convId == null || mutableChatMessages.value.isEmpty())
+        var convId = existingConvId
         if (convId == null) {
             convId = UUID.randomUUID().toString()
             conversationManagerDelegate.setActiveConversationIdDirect(convId)
         }
+        mutableAttachedFiles.value = emptyList()
+        sendMessageForConversation(context, convId, content, currentAttachments)
+    }
 
-        if (conversationTitle.value == "New Conversation" || conversationTitle.value.isBlank()) {
+    fun proceedWithPlan(context: Context, messageId: String) {
+        val convId = activeConversationId.value ?: return
+        val updated = updateMessagesForConv(convId) { list ->
+            list.map { msg ->
+                if (msg.id == messageId) msg.copy(requiresPlanReview = false) else msg
+            }
+        }
+        saveMessagesForConversation(context, convId, updated)
+        sendMessage(context, "Proceed")
+    }
+
+    private fun sendMessageForConversation(
+        context: Context,
+        convId: String,
+        content: String,
+        currentAttachments: List<AttachedFile>
+    ) {
+        if (isConversationExecuting(convId)) {
+            queueMessage(content, currentAttachments, convId)
+            return
+        }
+
+        val isForeground = (activeConversationId.value == convId)
+        val existingMessages = if (isForeground) {
+            mutableChatMessages.value
+        } else {
+            messagesByConv[convId] ?: loadMessagesForConversation(context, convId)
+        }
+
+        val currentTitle = if (isForeground) {
+            conversationTitle.value
+        } else {
+            conversationHistory.value.find { it.id == convId }?.title ?: "New Conversation"
+        }
+        var resolvedTitle = currentTitle
+        if (currentTitle == "New Conversation" || currentTitle.isBlank()) {
             val titleCandidate = content.lines().firstOrNull { it.isNotBlank() }?.trim()?.take(35)
                 ?: currentAttachments.firstOrNull()?.name?.take(35)
             if (!titleCandidate.isNullOrEmpty()) {
-                conversationManagerDelegate.setConversationTitleDirect(titleCandidate)
+                resolvedTitle = titleCandidate
+                if (isForeground) {
+                    conversationManagerDelegate.setConversationTitleDirect(titleCandidate)
+                }
             }
         }
 
@@ -1539,16 +1721,18 @@ class AntigravityViewModel : ViewModel() {
             content = effectiveContent,
             attachments = currentAttachments
         )
-        val updatedMessages = mutableChatMessages.value + userMessage
-        mutableChatMessages.value = updatedMessages
-        mutableAttachedFiles.value = emptyList()
+        val updatedMessages = existingMessages + userMessage
+        messagesByConv[convId] = updatedMessages
+        if (isForeground) {
+            mutableChatMessages.value = updatedMessages
+        }
 
         val currentSummary = ConversationSummary(
             id = convId,
-            title = conversationTitle.value,
+            title = resolvedTitle,
             timestamp = System.currentTimeMillis(),
             messageCount = updatedMessages.size,
-            isPinned = isConversationPinned.value,
+            isPinned = if (isForeground) isConversationPinned.value else (conversationHistory.value.find { it.id == convId }?.isPinned ?: false),
             projectPath = workspacePath.value
         )
         conversationManagerDelegate.updateConversationHistoryDirect { list ->
@@ -1556,7 +1740,9 @@ class AntigravityViewModel : ViewModel() {
         }
         saveConversationHistory(context)
         saveMessagesForConversation(context, convId, updatedMessages)
-        saveLastActiveConversationId(context, convId)
+        if (isForeground) {
+            saveLastActiveConversationId(context, convId)
+        }
 
         val isShellCommand = content.startsWith("!") || content.startsWith("$ ")
         addLog("Chat", "User prompt: ${effectiveContent.take(150)}")
@@ -1570,7 +1756,10 @@ class AntigravityViewModel : ViewModel() {
                 thinking = null
             )
             val finalMessages = updatedMessages + assistantMsg
-            mutableChatMessages.value = finalMessages
+            messagesByConv[convId] = finalMessages
+            if (activeConversationId.value == convId) {
+                mutableChatMessages.value = finalMessages
+            }
             conversationManagerDelegate.updateConversationHistoryDirect { list ->
                 list.map { if (it.id == convId) it.copy(messageCount = finalMessages.size) else it }
             }
@@ -1583,17 +1772,30 @@ class AntigravityViewModel : ViewModel() {
     }
 
     private val executionWakeLock = WakeLockHolder()
-    private var currentAiExecutionJob: Job? = null
 
-    fun stopAiExecution() {
-        executionWakeLock.release()
-        addLog("Chat", "AI generation stopped by user")
-        currentAiExecutionJob?.cancel()
-        currentAiExecutionJob = null
-        EngineExecutor.stopAgyProcess()
-        mutableIsExecuting.value = false
-        mutableRunningTasks.value = emptyList()
-        mutableChatMessages.update { list ->
+    fun stopAiExecution(targetConvId: String? = activeConversationId.value) {
+        val convId = targetConvId
+        if (convId == null) {
+            jobsByConv.values.forEach { it.cancel() }
+            jobsByConv.clear()
+            EngineExecutor.stopAgyProcess()
+            mutableExecutingConvIds.value = emptySet()
+            runningTasksByConv.value = emptyMap()
+            workingStatusByConv.value = emptyMap()
+            executionWakeLock.release()
+            syncForegroundExecutionState()
+            return
+        }
+        addLog("Chat", "AI generation stopped by user (conv=$convId)")
+        jobsByConv.remove(convId)?.cancel()
+        EngineExecutor.stopAgyProcess(convId)
+        mutableExecutingConvIds.update { it - convId }
+        runningTasksByConv.update { it - convId }
+        workingStatusByConv.update { it - convId }
+        if (mutableExecutingConvIds.value.isEmpty()) {
+            executionWakeLock.release()
+        }
+        updateMessagesForConv(convId) { list ->
             list.map { msg ->
                 if (msg.status == MessageStatus.SENDING) {
                     msg.copy(
@@ -1604,11 +1806,13 @@ class AntigravityViewModel : ViewModel() {
                 } else msg
             }
         }
+        syncForegroundExecutionState()
     }
 
     fun undoPrompt(context: Context, userMessage: ChatMessage) {
-        if (mutableIsExecuting.value) {
-            stopAiExecution()
+        val activeId = activeConversationId.value
+        if (activeId != null && isConversationExecuting(activeId)) {
+            stopAiExecution(activeId)
         }
         val promptText = userMessage.content
         mutablePendingInputText.value = promptText
@@ -1622,8 +1826,8 @@ class AntigravityViewModel : ViewModel() {
             }
             current.subList(userIdx, endIdx).clear()
             mutableChatMessages.value = current
-            val activeId = activeConversationId.value
             if (activeId != null) {
+                messagesByConv[activeId] = current
                 saveMessagesForConversation(context, activeId, current)
             }
         }
@@ -1642,17 +1846,57 @@ class AntigravityViewModel : ViewModel() {
         }
     }
 
+    private fun detectPlanArtifactInfo(
+        context: Context,
+        finalContent: String,
+        finalSteps: List<AgentExecutionStep>,
+        activeCliConvId: String?,
+        toolDetectedPlanPath: String?,
+        toolRequestedFeedback: Boolean
+    ): Pair<String?, Boolean> {
+        val stepPlanPath = finalSteps.firstOrNull {
+            it.kind == AgentStepKind.EDITED &&
+                it.filePath?.endsWith("implementation_plan.md", ignoreCase = true) == true
+        }?.filePath
+        val linkRegex = Regex("""file://([^\s)\]"']+\.md)""", RegexOption.IGNORE_CASE)
+        val linkedMdPath = linkRegex.findAll(finalContent)
+            .map { it.groupValues[1] }
+            .firstOrNull { it.endsWith("implementation_plan.md", ignoreCase = true) }
+            ?: linkRegex.find(finalContent)?.groupValues?.getOrNull(1)
+
+        var resolvedPath = toolDetectedPlanPath ?: stepPlanPath ?: linkedMdPath
+        if (resolvedPath == null && activeCliConvId != null) {
+            val candidates = listOf(
+                File(context.filesDir, "home/.gemini/antigravity-cli/brain/$activeCliConvId/implementation_plan.md"),
+                File(context.filesDir, ".gemini/antigravity-cli/brain/$activeCliConvId/implementation_plan.md"),
+                File(context.filesDir, "home/.gemini/antigravity-app/brain/$activeCliConvId/implementation_plan.md"),
+                File(context.filesDir, ".gemini/antigravity-app/brain/$activeCliConvId/implementation_plan.md")
+            )
+            resolvedPath = candidates.firstOrNull { it.isFile && it.exists() }?.absolutePath
+        }
+
+        val mentionsProceed = finalContent.contains("Proceed", ignoreCase = true) &&
+            (finalContent.contains("plan", ignoreCase = true) || resolvedPath != null)
+        val mentionsPlanFile = finalContent.contains("implementation_plan.md", ignoreCase = true)
+        val requiresReview = toolRequestedFeedback ||
+            (resolvedPath != null && (mentionsProceed || mentionsPlanFile)) ||
+            (mentionsPlanFile && mentionsProceed)
+
+        return resolvedPath to requiresReview
+    }
+
     private fun executeAiTurn(
         context: Context,
         prompt: String,
         convId: String,
         attachments: List<AttachedFile> = emptyList()
     ) {
-        currentAiExecutionJob?.cancel()
-        currentAiExecutionJob = viewModelScope.launch(Dispatchers.IO) {
+        jobsByConv.remove(convId)?.cancel()
+        val job = viewModelScope.launch(Dispatchers.IO) {
             executionWakeLock.acquire(context, 30 * 60 * 1000L)
-            mutableIsExecuting.value = true
-            mutableActiveWorkingStatus.value = "Working"
+            mutableExecutingConvIds.update { it + convId }
+            workingStatusByConv.update { it + (convId to "Working") }
+            syncForegroundExecutionState()
             val turnStartTime = System.currentTimeMillis()
 
             val assistantMsgId = UUID.randomUUID().toString()
@@ -1663,7 +1907,7 @@ class AntigravityViewModel : ViewModel() {
                 status = MessageStatus.SENDING,
                 thinking = null
             )
-            mutableChatMessages.update { it + initialAssistantMsg }
+            updateMessagesForConv(convId) { it + initialAssistantMsg }
 
             val currentWorkspace = workspacePath.value
             val wsDir = if (!currentWorkspace.isNullOrBlank()) File(currentWorkspace) else null
@@ -1673,7 +1917,7 @@ class AntigravityViewModel : ViewModel() {
 
                 if (prompt.startsWith("!") || prompt.startsWith("$ ")) {
                     val cmd = if (prompt.startsWith("!")) prompt.substring(1).trim() else prompt.substring(2).trim()
-                    mutableChatMessages.update { list ->
+                    updateMessagesForConv(convId) { list ->
                         list.map { msg ->
                             if (msg.id == assistantMsgId) {
                                 msg.copy(commandRun = cmd, thinking = "Executing command in Linux shell...")
@@ -1682,9 +1926,9 @@ class AntigravityViewModel : ViewModel() {
                     }
 
                     val outputSb = StringBuilder()
-                    val exitCode = EngineExecutor.executeCommand(context, cmd, workingDir = validWsDir) { line, exitCode ->
+                    val exitCode = EngineExecutor.executeCommand(context, cmd, workingDir = validWsDir) { line, _ ->
                         outputSb.append(line).append("\n")
-                        mutableChatMessages.update { list ->
+                        updateMessagesForConv(convId) { list ->
                             list.map { msg ->
                                 if (msg.id == assistantMsgId) {
                                     msg.copy(commandOutput = outputSb.toString())
@@ -1693,7 +1937,7 @@ class AntigravityViewModel : ViewModel() {
                         }
                     }
 
-                    mutableChatMessages.update { list ->
+                    updateMessagesForConv(convId) { list ->
                         list.map { msg ->
                             if (msg.id == assistantMsgId) {
                                 msg.copy(
@@ -1775,6 +2019,8 @@ class AntigravityViewModel : ViewModel() {
                     var lastStepUpdateMs = 0L
                     var lastTranscriptPollMs = 0L
                     val authUrlRegex = "(https://accounts\\.google\\.com/o/oauth2/auth\\S+)".toRegex()
+                    var toolDetectedPlanPath: String? = null
+                    var toolRequestedFeedback = false
 
                     var currentTurn = 0
                     val maxAutoTurns = 8
@@ -1838,7 +2084,7 @@ class AntigravityViewModel : ViewModel() {
                             addLog("Agent", "Autonomous turn $currentTurn started...")
                         }
 
-                        exitCode = EngineExecutor.executeAgy(context, args, workingDir = validWsDir) { line, exitCode ->
+                        exitCode = EngineExecutor.executeAgy(context, args, workingDir = validWsDir, executionKey = convId) { line, _ ->
                         val trimmed = line.trim()
                         val match = authUrlRegex.find(trimmed)
                         if (match != null) {
@@ -1898,17 +2144,33 @@ class AntigravityViewModel : ViewModel() {
                                                         stepDiff = null
                                                         stepKind = AgentStepKind.ANALYZED
                                                     }
-                                                    "write_to_file", "replace_file_content" -> {
+                                                    "write_file", "write_to_file", "edit_file", "replace_file_content" -> {
                                                         val path = extractPathFromParams(params)
                                                         stepFilePath = path.ifEmpty { null }
                                                         stepTitle = extractFileNameFromPath(path, fallback = "file")
                                                         stepLines = null
-                                                        val targetContent = params?.optString("TargetContent") ?: ""
-                                                        val replacementContent = params?.optString("ReplacementContent") ?: params?.optString("CodeContent") ?: ""
+                                                        val targetContent = params?.optString("TargetContent") ?: params?.optString("Target") ?: ""
+                                                        val replacementContent = params?.optString("ReplacementContent")
+                                                            ?: params?.optString("Replacement")
+                                                            ?: params?.optString("CodeContent")
+                                                            ?: params?.optString("Content")
+                                                            ?: ""
                                                         val delCount = if (targetContent.isNotBlank()) targetContent.count { it == '\n' } + 1 else 0
                                                         val addCount = if (replacementContent.isNotBlank()) replacementContent.count { it == '\n' } + 1 else 1
                                                         stepDiff = "+$addCount -$delCount"
                                                         stepKind = AgentStepKind.EDITED
+                                                        val artMeta = params?.optJSONObject("ArtifactMetadata")
+                                                            ?: params?.optJSONObject("artifactMetadata")
+                                                        if (artMeta != null) {
+                                                            val reqFeedback = artMeta.optBoolean("RequestFeedback", false) ||
+                                                                artMeta.optBoolean("requestFeedback", false)
+                                                            if (reqFeedback) toolRequestedFeedback = true
+                                                            if (path.isNotBlank() && (reqFeedback || path.endsWith("implementation_plan.md", ignoreCase = true))) {
+                                                                toolDetectedPlanPath = path
+                                                            }
+                                                        } else if (path.endsWith("implementation_plan.md", ignoreCase = true)) {
+                                                            toolDetectedPlanPath = path
+                                                        }
                                                     }
                                                     "run_command" -> {
                                                         val action = params?.optString("toolAction")?.trim()?.removeSurrounding("\"")?.removeSurrounding("'") ?: ""
@@ -2007,13 +2269,18 @@ class AntigravityViewModel : ViewModel() {
                                                 if (toolName == "run_command") {
                                                     val cmdClean = params?.optString("CommandLine")?.trim()?.removeSurrounding("\"")?.removeSurrounding("'") ?: ""
                                                     if (state == "ACTIVE") {
-                                                        if (cmdClean.isNotBlank() && mutableRunningTasks.value.none { it.id == stableStepId || it.command == cmdClean }) {
-                                                            mutableRunningTasks.update { it + RunningTask(id = stableStepId, name = stepTitle, command = cmdClean) }
+                                                        val existing = runningTasksByConv.value[convId].orEmpty()
+                                                        if (cmdClean.isNotBlank() && existing.none { it.id == stableStepId || it.command == cmdClean }) {
+                                                            addRunningTask(name = stepTitle, command = cmdClean, convId = convId)
                                                         }
                                                     } else {
-                                                        removeRunningTask(stableStepId)
+                                                        removeRunningTask(stableStepId, convId)
                                                         if (cmdClean.isNotBlank()) {
-                                                            mutableRunningTasks.update { list -> list.filter { it.command != cmdClean } }
+                                                            runningTasksByConv.update { map ->
+                                                                val updated = map[convId].orEmpty().filter { it.command != cmdClean }
+                                                                if (updated.isEmpty()) map - convId else map + (convId to updated)
+                                                            }
+                                                            syncForegroundExecutionState()
                                                         }
                                                     }
                                                 } else if (toolName == "invoke_subagent") {
@@ -2091,7 +2358,7 @@ class AntigravityViewModel : ViewModel() {
                                                     val liveThinking = liveParsed?.thinking
                                                     val liveThoughts = liveParsed?.steps?.filter { it.kind == AgentStepKind.THOUGHT }.orEmpty()
 
-                                                    mutableChatMessages.update { list ->
+                                                    updateMessagesForConv(convId) { list ->
                                                         list.map { msg ->
                                                             if (msg.id == assistantMsgId) {
                                                                 val curSteps = msg.steps
@@ -2129,7 +2396,7 @@ class AntigravityViewModel : ViewModel() {
                                                     if (thoughtText.isNotBlank()) {
                                                         TerminalSessionManager.appendAgyLine("* Thinking: ${thoughtText.replace('\n', ' ')}")
                                                     }
-                                                    mutableChatMessages.update { list ->
+                                                    updateMessagesForConv(convId) { list ->
                                                         list.map { msg ->
                                                             if (msg.id == assistantMsgId) {
                                                                 val curSteps = msg.steps
@@ -2154,7 +2421,7 @@ class AntigravityViewModel : ViewModel() {
                                                     if (now - lastStreamUpdateMs > 250L) {
                                                         lastStreamUpdateMs = now
                                                         val currentOutput = outputSb.toString()
-                                                        mutableChatMessages.update { list ->
+                                                        updateMessagesForConv(convId) { list ->
                                                             list.map { msg ->
                                                                 if (msg.id == assistantMsgId) {
                                                                     msg.copy(content = currentOutput)
@@ -2177,7 +2444,7 @@ class AntigravityViewModel : ViewModel() {
                                             val liveParsed = parseTranscriptTurn(context, activeCliConvId)
                                             val liveThinking = liveParsed.thinking
                                             val liveTranscriptSteps = liveParsed.steps
-                                            mutableChatMessages.update { list ->
+                                            updateMessagesForConv(convId) { list ->
                                                 list.map { msg ->
                                                     if (msg.id == assistantMsgId) {
                                                         msg.copy(
@@ -2198,7 +2465,7 @@ class AntigravityViewModel : ViewModel() {
                                 if (now - lastStreamUpdateMs > 250L) {
                                     lastStreamUpdateMs = now
                                     val currentOutput = outputSb.toString()
-                                    mutableChatMessages.update { list ->
+                                    updateMessagesForConv(convId) { list ->
                                         list.map { msg ->
                                             if (msg.id == assistantMsgId) {
                                                 msg.copy(content = currentOutput)
@@ -2215,7 +2482,7 @@ class AntigravityViewModel : ViewModel() {
                                 if (now - lastStreamUpdateMs > 250L) {
                                     lastStreamUpdateMs = now
                                     val currentOutput = outputSb.toString()
-                                    mutableChatMessages.update { list ->
+                                    updateMessagesForConv(convId) { list ->
                                         list.map { msg ->
                                             if (msg.id == assistantMsgId) {
                                                 msg.copy(content = currentOutput)
@@ -2229,7 +2496,7 @@ class AntigravityViewModel : ViewModel() {
 
                         if (outputSb.isNotEmpty()) {
                             val finalCurrentOutput = outputSb.toString()
-                            mutableChatMessages.update { list ->
+                            updateMessagesForConv(convId) { list ->
                                 list.map { msg ->
                                     if (msg.id == assistantMsgId && msg.content != finalCurrentOutput) {
                                         msg.copy(content = finalCurrentOutput)
@@ -2270,7 +2537,7 @@ class AntigravityViewModel : ViewModel() {
                     val durText = if (elapsedSec >= 60) "${elapsedSec / 60}m" else "${elapsedSec}s"
                     val turnChanges = computeTurnFileChanges(context, workspacePath.value)
 
-                    val currentSteps = mutableChatMessages.value.find { it.id == assistantMsgId }?.steps.orEmpty()
+                    val currentSteps = messagesByConv[convId].orEmpty().find { it.id == assistantMsgId }?.steps.orEmpty()
                     val finalParsed = parseTranscriptTurn(context, activeCliConvId)
                     val finalThinking = finalParsed.thinking
                         ?: currentSteps.find { it.kind == AgentStepKind.THOUGHT }?.detail
@@ -2328,10 +2595,19 @@ class AntigravityViewModel : ViewModel() {
                         context.getString(R.string.chat_task_completed)
                     }
 
+                    val (detectedPlanPath, requiresPlanReview) = detectPlanArtifactInfo(
+                        context = context,
+                        finalContent = finalContent,
+                        finalSteps = finalSteps,
+                        activeCliConvId = activeCliConvId,
+                        toolDetectedPlanPath = toolDetectedPlanPath,
+                        toolRequestedFeedback = toolRequestedFeedback
+                    )
+
                     addLog("Agent", "Turn completed ($durText). Output: ${finalContent.take(150)}")
                     TerminalSessionManager.appendAgyLine("[AGY] Turn $currentTurn completed ($durText)")
 
-                    mutableChatMessages.update { list ->
+                    updateMessagesForConv(convId) { list ->
                         list.map { msg ->
                             if (msg.id == assistantMsgId) {
                                 val summaryParts = mutableListOf<String>()
@@ -2347,7 +2623,9 @@ class AntigravityViewModel : ViewModel() {
                                     durationText = durText,
                                     actionSummary = actSummary,
                                     fileChanges = turnChanges,
-                                    steps = finalSteps
+                                    steps = finalSteps,
+                                    planArtifactPath = detectedPlanPath,
+                                    requiresPlanReview = requiresPlanReview
                                 )
                             } else msg
                         }
@@ -2362,11 +2640,11 @@ class AntigravityViewModel : ViewModel() {
                 }
             } catch (e: Throwable) {
                 if (e is kotlinx.coroutines.CancellationException) {
-                    mutableChatMessages.update { list ->
+                    updateMessagesForConv(convId) { list ->
                         list.filter { it.id != assistantMsgId || it.content.isNotBlank() }
                     }
                 } else {
-                    mutableChatMessages.update { list ->
+                    updateMessagesForConv(convId) { list ->
                         list.map { msg ->
                             if (msg.id == assistantMsgId) {
                                 msg.copy(
@@ -2386,22 +2664,26 @@ class AntigravityViewModel : ViewModel() {
                     )
                 }
             } finally {
-                executionWakeLock.release()
-                mutableIsExecuting.value = false
-                mutableActiveWorkingStatus.value = null
-                currentAiExecutionJob = null
-                mutableRunningTasks.value = emptyList()
+                jobsByConv.remove(convId)
+                mutableExecutingConvIds.update { it - convId }
+                runningTasksByConv.update { it - convId }
+                workingStatusByConv.update { it - convId }
+                if (mutableExecutingConvIds.value.isEmpty()) {
+                    executionWakeLock.release()
+                }
                 mutableRunningSubagents.update { list -> list.map { it.copy(isRunning = false) } }
-                val currentList = mutableChatMessages.value
+                syncForegroundExecutionState()
+                val currentList = messagesByConv[convId].orEmpty()
                 conversationManagerDelegate.updateConversationHistoryDirect { list ->
                     list.map { if (it.id == convId) it.copy(messageCount = currentList.size, timestamp = System.currentTimeMillis()) else it }
                 }
                 saveConversationHistory(context)
                 saveMessagesForConversation(context, convId, currentList)
-                processNextQueuedMessage(context)
+                processNextQueuedMessage(context, convId)
                 refreshUserQuota(context)
             }
         }
+        jobsByConv[convId] = job
     }
 
     suspend fun computeTurnFileChanges(context: Context, workspacePath: String?): TurnFileChanges? = withContext(Dispatchers.IO) {

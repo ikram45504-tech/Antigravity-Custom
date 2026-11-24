@@ -126,7 +126,9 @@ data class ChatMessage(
     val steps: List<AgentExecutionStep> = emptyList(),
     val durationText: String? = null,
     val actionSummary: String? = null,
-    val fileChanges: TurnFileChanges? = null
+    val fileChanges: TurnFileChanges? = null,
+    val planArtifactPath: String? = null,
+    val requiresPlanReview: Boolean = false
 ) {
     val attachedFiles: List<AttachedFile> get() = attachments
 

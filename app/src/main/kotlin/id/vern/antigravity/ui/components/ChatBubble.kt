@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.ui.layout.ContentScale
@@ -103,6 +104,7 @@ fun ChatBubble(
     onOpenFile: (String) -> Unit = {},
     onOpenTerminal: (String) -> Unit = {},
     onUndoPrompt: (ChatMessage) -> Unit = {},
+    onProceedPlan: (ChatMessage) -> Unit = {},
     isPinnedExecuting: Boolean = false,
     isExecuting: Boolean = false
 ) {
@@ -713,7 +715,8 @@ fun ChatBubble(
                             textColor = MaterialTheme.colorScheme.onSurface,
                             fontSize = 12.sp,
                             lineHeight = 17.sp,
-                            selectable = isSelectionEnabled && message.status == MessageStatus.SENT
+                            selectable = isSelectionEnabled && message.status == MessageStatus.SENT,
+                            onOpenLocalFile = onOpenFile
                         )
 
                         val toastCopiedMsg = stringResource(R.string.chat_toast_copied)
@@ -764,6 +767,104 @@ fun ChatBubble(
                                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                                 )
+                            }
+                        }
+                    }
+                }
+            }
+
+            val planPath = message.planArtifactPath
+            if (!planPath.isNullOrBlank() || message.requiresPlanReview) {
+                val planFileName = planPath?.substringAfterLast("/")?.ifBlank { "implementation_plan.md" } ?: "implementation_plan.md"
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    border = BorderStroke(1.dp, AntigravityBlue.copy(alpha = 0.35f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .let { mod ->
+                                if (!planPath.isNullOrBlank()) mod.clickable { onOpenFile(planPath) } else mod
+                            }
+                            .padding(horizontal = 12.dp, vertical = 9.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Description,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = AntigravityBlue
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.chat_plan_card_title),
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = if (message.requiresPlanReview) stringResource(R.string.chat_plan_card_ready) else planFileName,
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        if (!planPath.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                                modifier = Modifier.clickable { onOpenFile(planPath) }
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.chat_btn_view_plan),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+                        if (message.requiresPlanReview && !isExecuting) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = AntigravityBlue,
+                                modifier = Modifier.clickable { onProceedPlan(message) }
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayArrow,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(13.dp),
+                                        tint = Color.White
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = stringResource(R.string.chat_btn_proceed),
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        ),
+                                        color = Color.White
+                                    )
+                                }
                             }
                         }
                     }

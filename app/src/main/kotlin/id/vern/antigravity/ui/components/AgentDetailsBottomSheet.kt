@@ -161,9 +161,11 @@ fun AgentDetailsBottomSheet(
                 projectList = projectList,
                 context = context
             )
-            if (fileToLoad != null) {
+            if (fileToLoad != null && fileToLoad.exists() && fileToLoad.isFile) {
                 viewModel.openFileInEditor(fileToLoad)
                 selectedTab = 3
+            } else {
+                Toast.makeText(context, context.getString(R.string.chat_file_not_found, initialFileToOpen.substringAfterLast("/")), Toast.LENGTH_SHORT).show()
             }
         }
     }
