@@ -14,6 +14,8 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.isActive
 import id.vern.antigravity.AntigravityApp
 import id.vern.antigravity.R
+import id.vern.antigravity.oauth.GitHubAccount
+import id.vern.antigravity.oauth.GitHubDeviceCode
 import id.vern.antigravity.data.AccentColor
 import id.vern.antigravity.data.AppearanceConfig
 import id.vern.antigravity.data.AttachedFile
@@ -261,6 +263,10 @@ class AntigravityViewModel : ViewModel() {
     val userName: StateFlow<String> = authDelegate.userName
     val userPicture: StateFlow<String?> = authDelegate.userPicture
     val accounts: StateFlow<List<StoredAccount>> = authDelegate.accounts
+    val githubAccount: StateFlow<GitHubAccount?> = authDelegate.githubAccount
+    val githubDeviceCode: StateFlow<GitHubDeviceCode?> = authDelegate.githubDeviceCode
+    val isGithubAuthenticating: StateFlow<Boolean> = authDelegate.isGithubAuthenticating
+    val githubAuthError: StateFlow<String?> = authDelegate.githubAuthError
 
     val projectList: StateFlow<List<File>> = projectWorkspaceDelegate.projectList
     val projectSortOrder: StateFlow<ProjectSortOrder> = projectWorkspaceDelegate.projectSortOrder
@@ -794,6 +800,15 @@ class AntigravityViewModel : ViewModel() {
 
     fun showGoogleSignInDialog() = authDelegate.showGoogleSignInDialog()
     fun dismissGoogleSignInDialog() = authDelegate.dismissGoogleSignInDialog()
+
+    fun refreshGitHubState(context: Context) = authDelegate.refreshGitHubState(context)
+    fun startGitHubDeviceFlow(context: Context) =
+        authDelegate.startGitHubDeviceFlow(context, viewModelScope, ::addLog)
+    fun cancelGitHubDeviceFlow() = authDelegate.cancelGitHubDeviceFlow()
+    fun connectGitHubWithPat(context: Context, token: String) =
+        authDelegate.connectGitHubWithPat(context, token, viewModelScope, ::addLog)
+    fun disconnectGitHub(context: Context) =
+        authDelegate.disconnectGitHub(context, ::addLog)
 
     fun loadProjects(context: Context) = projectWorkspaceDelegate.loadProjects(context)
     fun saveProjects(context: Context, list: List<File>) = projectWorkspaceDelegate.saveProjects(context, list)

@@ -3,6 +3,7 @@ package id.vern.antigravity.executor
 import android.content.Context
 import android.system.Os
 import id.vern.antigravity.install.BootstrapInstaller
+import id.vern.antigravity.oauth.GitHubAuthManager
 import id.vern.antigravity.oauth.OAuthManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -253,6 +254,7 @@ object EngineExecutor {
                     gitConfig.appendText("\n$sslLine")
                 }
             }
+            GitHubAuthManager.syncGitCredentials(context)
 
             val rootConfig = File(filesDir, ".gemini/config")
             val homeConfig = File(homeDir, ".gemini/config")

@@ -166,6 +166,7 @@ enum class SettingsPage {
     MODELS_AND_USAGE,
     CUSTOMIZATIONS,
     ACCOUNT,
+    GITHUB,
     DEVELOPER,
     ABOUT
 }
@@ -337,6 +338,12 @@ fun SettingsBottomSheet(
                             onNavigateTo = { pageStack.add(it) }
                         )
                     }
+                    SettingsPage.GITHUB -> {
+                        GitHubSettingsPage(
+                            viewModel = viewModel,
+                            onBack = { pageStack.removeAt(pageStack.lastIndex) }
+                        )
+                    }
                     SettingsPage.DEVELOPER -> {
                         DeveloperSettingsPage(
                             viewModel = viewModel,
@@ -381,6 +388,7 @@ fun MainSettingsPage(
     val userEmail by viewModel.userEmail.collectAsStateWithLifecycle()
     val userName by viewModel.userName.collectAsStateWithLifecycle()
     val userPicture by viewModel.userPicture.collectAsStateWithLifecycle()
+    val githubAccount by viewModel.githubAccount.collectAsStateWithLifecycle()
     val scrollState = rememberScrollState()
 
     Column(
@@ -417,6 +425,10 @@ fun MainSettingsPage(
             SettingsMenuRow(
                 title = "Customizations",
                 onClick = { onNavigateTo(SettingsPage.CUSTOMIZATIONS) }
+            )
+            SettingsMenuRow(
+                title = if (githubAccount != null) "GitHub (@${githubAccount!!.login})" else "GitHub",
+                onClick = { onNavigateTo(SettingsPage.GITHUB) }
             )
             SettingsMenuRow(
                 title = "Developer & System",
@@ -507,6 +519,266 @@ fun MainSettingsPage(
         }
 
         Spacer(modifier = Modifier.height(20.dp))
+    }
+}
+
+@Composable
+@Composable
+fun GitHubSettingsPage(
+    viewModel: AntigravityViewModel,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    val githubAccount by viewModel.githubAccount.collectAsStateWithLifecycle()
+    val deviceCode by viewModel.githubDeviceCode.collectAsStateWithLifecycle()
+    val isAuthenticating by viewModel.isGithubAuthenticating.collectAsStateWithLifecycle()
+    val authError by viewModel.githubAuthError.collectAsStateWithLifecycle()
+    var patInput by remember { mutableStateOf("") }
+    var showPatOption by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
+
+    LaunchedEffect(Unit) {
+        viewModel.refreshGitHubState(context)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 20.dp, vertical = 6.dp)
+    ) {
+        SubSheetHeader(
+            title = "GitHub",
+            subtitle = "Connect your GitHub account for git & repositories",
+            onBack = onBack
+        )
+
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(scrollState)
+        ) {
+            if (githubAccount != null) {
+                val acc = githubAccount!!
+                SettingsCard {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(AntigravityBlue.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (!acc.avatarUrl.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = acc.avatarUrl,
+                                        contentDescription = acc.login,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    Text(
+                                        text = acc.login.take(1).uppercase(),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 20.sp,
+                                        color = AntigravityBlue
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = acc.name,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "@${acc.login}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "Connected",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = AntigravityGreen,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Text(
+                            text = "Email: ${acc.email}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Git credentials are synced to ~/.git-credentials for all repositories.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                        )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+                        OutlinedButton(
+                            onClick = { viewModel.disconnectGitHub(context) },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = AntigravityRed),
+                            border = BorderStroke(1.dp, AntigravityRed.copy(alpha = 0.4f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Disconnect GitHub")
+                        }
+                    }
+                }
+            } else {
+                SettingsCard {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Connect GitHub Account",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Sign in with GitHub Device Flow to clone, pull, and push across all your repositories.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        if (!authError.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = authError!!,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = AntigravityRed
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        if (deviceCode != null) {
+                            val code = deviceCode!!
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.padding(16.dp)
+                                ) {
+                                    Text(
+                                        text = "Enter this one-time code on GitHub:",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = code.userCode,
+                                        style = MaterialTheme.typography.headlineSmall,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                cm.setPrimaryClip(ClipData.newPlainText("GitHub Code", code.userCode))
+                                                Toast.makeText(context, "Code copied", Toast.LENGTH_SHORT).show()
+                                            }
+                                        ) {
+                                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Copy Code")
+                                        }
+                                        Button(
+                                            onClick = {
+                                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                cm.setPrimaryClip(ClipData.newPlainText("GitHub Code", code.userCode))
+                                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(code.verificationUri))
+                                                context.startActivity(intent)
+                                            }
+                                        ) {
+                                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Open GitHub")
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Waiting for authorization...",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    TextButton(onClick = { viewModel.cancelGitHubDeviceFlow() }) {
+                                        Text("Cancel")
+                                    }
+                                }
+                            }
+                        } else {
+                            Button(
+                                onClick = { viewModel.startGitHubDeviceFlow(context) },
+                                enabled = !isAuthenticating,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                if (isAuthenticating) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onPrimary
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                }
+                                Text("Connect with GitHub")
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+                        TextButton(
+                            onClick = { showPatOption = !showPatOption },
+                            modifier = Modifier.align(Alignment.CenterHorizontally)
+                        ) {
+                            Text(if (showPatOption) "Hide token input" else "Or use a Personal Access Token")
+                        }
+
+                        AnimatedVisibility(visible = showPatOption) {
+                            Column(modifier = Modifier.padding(top = 8.dp)) {
+                                OutlinedTextField(
+                                    value = patInput,
+                                    onValueChange = { patInput = it },
+                                    label = { Text("GitHub Token (ghp_... or github_pat_...)") },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedButton(
+                                    onClick = {
+                                        viewModel.connectGitHubWithPat(context, patInput)
+                                        patInput = ""
+                                    },
+                                    enabled = !isAuthenticating && patInput.isNotBlank(),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Save Token")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

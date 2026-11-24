@@ -5,6 +5,10 @@ import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import id.vern.antigravity.R
+import id.vern.antigravity.oauth.GitHubAccount
+import id.vern.antigravity.oauth.GitHubAuthManager
+import id.vern.antigravity.oauth.GitHubDeviceCode
+import id.vern.antigravity.oauth.GitHubPollResult
 import id.vern.antigravity.oauth.StoredAccount
 import id.vern.antigravity.oauth.AccountManager
 import id.vern.antigravity.oauth.OAuthManager
@@ -12,11 +16,14 @@ import id.vern.antigravity.executor.EngineExecutor
 import id.vern.antigravity.service.CloudCodeQuotaService
 import id.vern.antigravity.service.AgyModelsService
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class AuthDelegate {
     private val mutableUserEmail = MutableStateFlow<String?>(null)
@@ -43,6 +50,20 @@ class AuthDelegate {
     private val mutablePendingAuthUrl = MutableStateFlow<String?>(null)
     val pendingAuthUrl: StateFlow<String?> = mutablePendingAuthUrl.asStateFlow()
 
+    private val mutableGithubAccount = MutableStateFlow<GitHubAccount?>(null)
+    val githubAccount: StateFlow<GitHubAccount?> = mutableGithubAccount.asStateFlow()
+
+    private val mutableGithubDeviceCode = MutableStateFlow<GitHubDeviceCode?>(null)
+    val githubDeviceCode: StateFlow<GitHubDeviceCode?> = mutableGithubDeviceCode.asStateFlow()
+
+    private val mutableIsGithubAuthenticating = MutableStateFlow(false)
+    val isGithubAuthenticating: StateFlow<Boolean> = mutableIsGithubAuthenticating.asStateFlow()
+
+    private val mutableGithubAuthError = MutableStateFlow<String?>(null)
+    val githubAuthError: StateFlow<String?> = mutableGithubAuthError.asStateFlow()
+
+    private var githubPollJob: Job? = null
+
     fun showGoogleSignInDialog() {
         mutableShowGoogleSignInDialog.value = true
     }
@@ -61,6 +82,7 @@ class AuthDelegate {
         onRefreshUserQuota: (Context) -> Unit
     ) {
         OAuthManager.checkAndImportExistingToken(context)
+        mutableGithubAccount.value = GitHubAuthManager.getAccount(context)
         val allAccounts = AccountManager.getAccounts(context)
         mutableAccounts.value = allAccounts
         val email = OAuthManager.getUserEmail(context)
@@ -321,5 +343,131 @@ class AuthDelegate {
         onSignedOut()
         onLog("Auth", "Signed out of Google account")
         Toast.makeText(context, context.getString(R.string.account_toast_signed_out), Toast.LENGTH_SHORT).show()
+    }
+
+    fun refreshGitHubState(context: Context) {
+        mutableGithubAccount.value = GitHubAuthManager.getAccount(context)
+    }
+
+    fun startGitHubDeviceFlow(
+        context: Context,
+        scope: CoroutineScope,
+        onLog: (String, String, Boolean) -> Unit
+    ) {
+        githubPollJob?.cancel()
+        mutableGithubAuthError.value = null
+        mutableIsGithubAuthenticating.value = true
+        mutableGithubDeviceCode.value = null
+
+        githubPollJob = scope.launch {
+            val codeResult = withContext(Dispatchers.IO) {
+                GitHubAuthManager.requestDeviceCode()
+            }
+            val deviceCode = codeResult.getOrElse { err ->
+                mutableIsGithubAuthenticating.value = false
+                mutableGithubAuthError.value = err.message ?: "Failed to start GitHub login"
+                onLog("GitHub", "Device code error: ${err.message}", true)
+                return@launch
+            }
+
+            mutableGithubDeviceCode.value = deviceCode
+            var intervalSec = deviceCode.interval.coerceAtLeast(5)
+            val deadlineMs = System.currentTimeMillis() + (deviceCode.expiresIn * 1000L)
+
+            while (System.currentTimeMillis() < deadlineMs) {
+                delay(intervalSec * 1000L)
+                when (val poll = withContext(Dispatchers.IO) { GitHubAuthManager.pollAccessToken(deviceCode.deviceCode) }) {
+                    is GitHubPollResult.Success -> {
+                        withContext(Dispatchers.IO) {
+                            GitHubAuthManager.saveAccount(context, poll.account)
+                        }
+                        mutableGithubAccount.value = poll.account
+                        mutableGithubDeviceCode.value = null
+                        mutableIsGithubAuthenticating.value = false
+                        mutableGithubAuthError.value = null
+                        onLog("GitHub", "Connected GitHub account @${poll.account.login}", false)
+                        Toast.makeText(context, "Connected GitHub as @${poll.account.login}", Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
+                    is GitHubPollResult.Pending -> {
+                        if (poll.slowDown) intervalSec += 5
+                    }
+                    is GitHubPollResult.Expired -> {
+                        mutableGithubDeviceCode.value = null
+                        mutableIsGithubAuthenticating.value = false
+                        mutableGithubAuthError.value = "Code expired. Please try again."
+                        return@launch
+                    }
+                    is GitHubPollResult.Denied -> {
+                        mutableGithubDeviceCode.value = null
+                        mutableIsGithubAuthenticating.value = false
+                        mutableGithubAuthError.value = "Authorization was cancelled on GitHub."
+                        return@launch
+                    }
+                    is GitHubPollResult.Error -> {
+                        mutableGithubDeviceCode.value = null
+                        mutableIsGithubAuthenticating.value = false
+                        mutableGithubAuthError.value = poll.message
+                        onLog("GitHub", "OAuth error: ${poll.message}", true)
+                        return@launch
+                    }
+                }
+            }
+
+            mutableGithubDeviceCode.value = null
+            mutableIsGithubAuthenticating.value = false
+            mutableGithubAuthError.value = "Authorization timed out."
+        }
+    }
+
+    fun cancelGitHubDeviceFlow() {
+        githubPollJob?.cancel()
+        githubPollJob = null
+        mutableGithubDeviceCode.value = null
+        mutableIsGithubAuthenticating.value = false
+        mutableGithubAuthError.value = null
+    }
+
+    fun connectGitHubWithPat(
+        context: Context,
+        token: String,
+        scope: CoroutineScope,
+        onLog: (String, String, Boolean) -> Unit
+    ) {
+        val trimmed = token.trim()
+        if (trimmed.isBlank()) {
+            mutableGithubAuthError.value = "Token cannot be empty"
+            return
+        }
+        mutableGithubAuthError.value = null
+        mutableIsGithubAuthenticating.value = true
+        scope.launch {
+            val account = withContext(Dispatchers.IO) {
+                GitHubAuthManager.fetchUserProfile(trimmed)
+            }
+            if (account != null) {
+                withContext(Dispatchers.IO) {
+                    GitHubAuthManager.saveAccount(context, account)
+                }
+                mutableGithubAccount.value = account
+                mutableIsGithubAuthenticating.value = false
+                onLog("GitHub", "Connected GitHub account @${account.login} via PAT", false)
+                Toast.makeText(context, "Connected GitHub as @${account.login}", Toast.LENGTH_SHORT).show()
+            } else {
+                mutableIsGithubAuthenticating.value = false
+                mutableGithubAuthError.value = "Invalid token or failed to reach GitHub."
+            }
+        }
+    }
+
+    fun disconnectGitHub(
+        context: Context,
+        onLog: (String, String) -> Unit
+    ) {
+        cancelGitHubDeviceFlow()
+        GitHubAuthManager.signOut(context)
+        mutableGithubAccount.value = null
+        onLog("Auth", "Disconnected GitHub account")
+        Toast.makeText(context, "Disconnected GitHub account", Toast.LENGTH_SHORT).show()
     }
 }
