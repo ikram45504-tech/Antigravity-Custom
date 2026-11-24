@@ -38,19 +38,33 @@ object CloudCodeQuotaService {
     private const val MODELS_URL = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels"
     private const val TIER_URL = "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
 
-    private val cachedSslContext: SSLContext? by lazy {
+    private val loopbackHostnameVerifier = HostnameVerifier { hostname, _ ->
+        hostname == "127.0.0.1" || hostname == "localhost"
+    }
+
+    private val loopbackSelfSignedSslContext: SSLContext? by lazy {
         try {
-            val trustAllCerts = arrayOf<TrustManager>(object : X509ExtendedTrustManager() {
+            val trustLocalhostCerts = arrayOf<TrustManager>(object : X509ExtendedTrustManager() {
                 override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
                 override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
                 override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
                 override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?, socket: Socket?) {}
-                override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?, socket: Socket?) {}
+                override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?, socket: Socket?) {
+                    val host = socket?.inetAddress?.hostAddress
+                    if (host != "127.0.0.1" && host != "::1") {
+                        throw java.security.cert.CertificateException("Self-signed cert trust restricted to loopback, got $host")
+                    }
+                }
                 override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?, engine: SSLEngine?) {}
-                override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?, engine: SSLEngine?) {}
+                override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?, engine: SSLEngine?) {
+                    val peerHost = engine?.peerHost
+                    if (peerHost != null && peerHost != "127.0.0.1" && peerHost != "localhost") {
+                        throw java.security.cert.CertificateException("Self-signed cert trust restricted to loopback, got $peerHost")
+                    }
+                }
             })
             SSLContext.getInstance("TLS").apply {
-                init(null, trustAllCerts, SecureRandom())
+                init(null, trustLocalhostCerts, SecureRandom())
             }
         } catch (e: Exception) {
             null
@@ -131,14 +145,13 @@ object CloudCodeQuotaService {
         val schemes = listOf("https", "http")
         for (scheme in schemes) {
             try {
-                val sc = cachedSslContext
-                val allHostsValid = HostnameVerifier { hostname, session -> true }
+                val sc = loopbackSelfSignedSslContext
 
                 val url = URL("$scheme://127.0.0.1:$port/")
                 val conn = url.openConnection()
                 if (conn is HttpsURLConnection && sc != null) {
                     conn.sslSocketFactory = sc.socketFactory
-                    conn.hostnameVerifier = allHostsValid
+                    conn.hostnameVerifier = loopbackHostnameVerifier
                 }
                 conn.connectTimeout = 2500
                 conn.readTimeout = 2500
@@ -820,15 +833,14 @@ object CloudCodeQuotaService {
             var respStr: String? = null
             var modelsRespStr: String? = null
 
-            val sc = cachedSslContext
-            val allHostsValid = HostnameVerifier { hostname, session -> true }
+            val sc = loopbackSelfSignedSslContext
 
             try {
                 if (sc != null) {
                     val url = URL("https://127.0.0.1:$port/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary")
                     val conn = url.openConnection() as HttpsURLConnection
                     conn.sslSocketFactory = sc.socketFactory
-                    conn.hostnameVerifier = allHostsValid
+                    conn.hostnameVerifier = loopbackHostnameVerifier
                     conn.requestMethod = "POST"
                     conn.doOutput = true
                     conn.connectTimeout = 4000
@@ -869,7 +881,7 @@ object CloudCodeQuotaService {
                         val urlM = URL("https://127.0.0.1:$port/exa.language_server_pb.LanguageServerService/GetAvailableModels")
                         val connM = urlM.openConnection() as HttpsURLConnection
                         connM.sslSocketFactory = sc.socketFactory
-                        connM.hostnameVerifier = allHostsValid
+                        connM.hostnameVerifier = loopbackHostnameVerifier
                         connM.requestMethod = "POST"
                         connM.doOutput = true
                         connM.connectTimeout = 4000
@@ -948,11 +960,11 @@ object CloudCodeQuotaService {
         val candidates = getCandidateEndpoints(context)
         for ((port, csrf) in candidates) {
             try {
-                val sc = cachedSslContext ?: continue
+                val sc = loopbackSelfSignedSslContext ?: continue
                 val url = URL("https://127.0.0.1:$port/exa.language_server_pb.LanguageServerService/Restart")
                 val conn = url.openConnection() as HttpsURLConnection
                 conn.sslSocketFactory = sc.socketFactory
-                conn.hostnameVerifier = HostnameVerifier { hostname, session -> true }
+                conn.hostnameVerifier = loopbackHostnameVerifier
                 conn.requestMethod = "POST"
                 conn.doOutput = true
                 conn.connectTimeout = 3000

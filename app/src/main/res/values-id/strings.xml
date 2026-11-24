@@ -477,6 +477,10 @@
     <string name="core_update_available">Pembaruan tersedia: v%s</string>
     <string name="core_update_btn_check">Cek Pembaruan Core</string>
     <string name="core_update_btn_update">Perbarui Core Sekarang</string>
+    <string name="core_update_btn_rollback">Rollback Core</string>
+    <string name="core_update_rollback_success">Core engine dikembalikan ke v%s</string>
+    <string name="core_update_rollback_failed">Rollback core gagal: %s</string>
+    <string name="chat_core_execution_error">Core engine berhenti dengan kode %1$d tanpa output. Jika ini terjadi setelah pembaruan Core, coba rollback Core di Pengaturan Pengembang atau perbarui APK.</string>
     <string name="core_update_dialog_title">Antigravity Core CLI</string>
     <string name="core_update_cmd_title">Pembaruan Core CLI Antigravity</string>
     <string name="core_update_success">Core engine berhasil diperbarui ke v%s!</string>

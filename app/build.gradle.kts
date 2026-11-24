@@ -25,8 +25,8 @@ android {
         applicationId = "id.ikram.antigravity"
         minSdk = 26
         targetSdk = 28
-        versionCode = 9
-        versionName = "1.0.8"
+        versionCode = 10
+        versionName = "1.0.9"
 
         vectorDrawables {
             useSupportLibrary = true
@@ -113,8 +113,13 @@ android {
     }
 
     lint {
+        // Keep abortOnError = false until lint-baseline.xml is generated in a full SDK environment.
         abortOnError = false
-        checkReleaseBuilds = false
+        checkReleaseBuilds = true
+    }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
     }
 
     packaging {
@@ -151,5 +156,9 @@ dependencies {
     debugImplementation(libs.compose.ui.tooling)
 
     implementation(libs.kotlinx.serialization.json)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.org.json)
 }
 

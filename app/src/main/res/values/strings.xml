@@ -477,6 +477,10 @@
     <string name="core_update_available">Update available: v%s</string>
     <string name="core_update_btn_check">Check Core Update</string>
     <string name="core_update_btn_update">Update Core Now</string>
+    <string name="core_update_btn_rollback">Rollback Core</string>
+    <string name="core_update_rollback_success">Core engine rolled back to v%s</string>
+    <string name="core_update_rollback_failed">Core rollback failed: %s</string>
+    <string name="chat_core_execution_error">Core engine exited with code %1$d without output. If this happened right after a Core update, try rolling back Core in Developer Settings or updating the APK.</string>
     <string name="core_update_dialog_title">Antigravity Core CLI</string>
     <string name="core_update_cmd_title">Update Antigravity Core CLI</string>
     <string name="core_update_success">Core engine successfully updated to v%s!</string>

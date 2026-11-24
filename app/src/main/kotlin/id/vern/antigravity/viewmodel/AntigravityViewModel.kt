@@ -98,6 +98,8 @@ data class CoreEngineUpdateState(
     val latestVersion: String? = null,
     val isUpdateAvailable: Boolean = false,
     val downloadUrl: String? = null,
+    val sha512: String = "",
+    val hasBackup: Boolean = false,
     val lastCheckedTime: Long = 0L,
     val error: String? = null
 )
@@ -1002,9 +1004,11 @@ class AntigravityViewModel : ViewModel() {
 
     fun checkForCoreEngineUpdate(context: Context, force: Boolean = false) {
         val current = CoreUpdateManager.getCurrentVersion(context)
+        val hasBackup = CoreUpdateManager.hasBackup(context)
         coreUpdateState.value = coreUpdateState.value.copy(
             isChecking = true,
             currentVersion = current,
+            hasBackup = hasBackup,
             error = null
         )
         viewModelScope.launch(Dispatchers.IO) {
@@ -1013,6 +1017,32 @@ class AntigravityViewModel : ViewModel() {
                 coreUpdateState.value = updated
             } else {
                 coreUpdateState.value = coreUpdateState.value.copy(isChecking = false)
+            }
+        }
+    }
+
+    fun rollbackCoreEngine(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = CoreUpdateDelegate.rollbackCoreEngine(context)
+            if (result.isSuccess) {
+                val ver = result.getOrNull() ?: CoreUpdateManager.getCurrentVersion(context)
+                coreUpdateState.value = coreUpdateState.value.copy(
+                    currentVersion = ver,
+                    hasBackup = CoreUpdateManager.hasBackup(context),
+                    isUpdateAvailable = coreUpdateState.value.latestVersion?.let { CoreUpdateManager.isVersionNewer(it, ver) } ?: false,
+                    error = null
+                )
+                if (engineStatus.value.isRunning) {
+                    restartCoreService(context)
+                }
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, context.getString(R.string.core_update_rollback_success, ver), Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                val err = result.exceptionOrNull()?.message ?: "Unknown error"
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, context.getString(R.string.core_update_rollback_failed, err), Toast.LENGTH_LONG).show()
+                }
             }
         }
     }
@@ -1048,7 +1078,8 @@ class AntigravityViewModel : ViewModel() {
                     coreUpdateState.value = coreUpdateState.value.copy(
                         currentVersion = newVer,
                         isUpdateAvailable = false,
-                        latestVersion = newVer
+                        latestVersion = newVer,
+                        hasBackup = CoreUpdateManager.hasBackup(context)
                     )
                     customizationInstallerDelegate.setActiveInstallProgressDirect(activeInstallProgress.value?.copy(
                         lines = outputLines.toList(),
@@ -1417,7 +1448,6 @@ class AntigravityViewModel : ViewModel() {
         if (slashRefreshJob?.isActive == true) return
         slashRefreshJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-
                 val skills = getInstalledSkills(context).map {
                     SlashAction(
                         cmd = it.name.lowercase().trimStart('/'),
@@ -1426,36 +1456,18 @@ class AntigravityViewModel : ViewModel() {
                     )
                 }
 
-                val workflows = getDiscoveredWorkflows(context)
-
                 val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                val cached = loadCachedSlashCommands(prefs)
-                val cachedVersion = prefs.getString(KEY_CLI_SLASH_VERSION, null)
-
-                var cliCommands = cached
-                if (!EngineExecutor.isAgyRunning() && !mutableIsExecuting.value) {
-                    val version = runAgyCapture(context, listOf("--version"), 10_000L)
-                        ?.second?.lines()?.firstOrNull { it.isNotBlank() }?.trim()
-
-                    if (version != null && (version != cachedVersion || cached.isEmpty())) {
-                        val help = runAgyCapture(context, listOf("--help"), 15_000L)
-                        val parsed = help?.second?.let { SlashCommandParser.parse(it) } ?: emptyList()
-                        if (parsed.isNotEmpty()) {
-                            saveCachedSlashCommands(prefs, parsed, version)
-                            cliCommands = parsed
-                        }
-                    }
-                }
-
-                val allActions = mergeDynamicSlashActions(
-                    systemCommands = SYSTEM_SLASH_COMMANDS,
-                    cliCommands = cliCommands,
+                val result = CliSlashCommandDelegate.refreshSlashActions(
+                    context = context,
+                    prefs = prefs,
                     skills = skills,
-                    workflows = workflows
+                    configDir = getGeminiConfigDir(context),
+                    workspacePath = workspacePath.value,
+                    isExecuting = mutableIsExecuting.value
                 )
 
-                mutableSlashActions.value = allActions
-                addLog("Slash", "Loaded dynamic slash menu (${allActions.size} actions: ${skills.size} skills, ${workflows.size} workflows, ${cliCommands.size} CLI)")
+                mutableSlashActions.value = result.actions
+                addLog("Slash", "Loaded dynamic slash menu (${result.actions.size} actions: ${result.skillCount} skills, ${result.workflowCount} workflows, ${result.cliCount} CLI)")
             } catch (e: Exception) {
                 try {
                     val fallbackSkills = getInstalledSkills(context).map {
@@ -1467,96 +1479,10 @@ class AntigravityViewModel : ViewModel() {
                         skills = fallbackSkills,
                         workflows = emptyList()
                     )
-                } catch (e: Exception) {}
+                } catch (_: Exception) {}
                 addLog("Slash", "Failed to load slash menu: ${e.message}", isError = true)
             }
         }
-    }
-
-    private fun getDiscoveredWorkflows(context: Context): List<SlashAction> {
-        val list = mutableListOf<SlashAction>()
-        val seen = mutableSetOf<String>()
-        val configDir = getGeminiConfigDir(context)
-        val dirs = mutableListOf(
-            File(configDir, "workflows"),
-            File(context.filesDir, ".gemini/config/workflows"),
-            File(context.filesDir, "home/.gemini/config/workflows")
-        )
-        val wsPath = workspacePath.value
-        if (!wsPath.isNullOrBlank()) {
-            val wsDir = File(wsPath)
-            dirs.add(File(wsDir, ".gemini/workflows"))
-            dirs.add(File(wsDir, ".agents/workflows"))
-            dirs.add(File(wsDir, ".agent/workflows"))
-            dirs.add(File(wsDir, "workflows"))
-        }
-        for (dir in dirs) {
-            if (dir.isDirectory) {
-                dir.listFiles()?.filter { it.isFile && (it.extension == "md" || it.extension == "prompt" || it.extension == "yaml") }?.forEach { f ->
-                    val name = f.nameWithoutExtension.lowercase()
-                    if (!seen.contains(name)) {
-                        seen.add(name)
-                        var desc = "Workflow from ${f.name}"
-                        try {
-                            val firstLine = f.readLines().firstOrNull { it.isNotBlank() && !it.startsWith("---") && !it.startsWith("#") }
-                            if (!firstLine.isNullOrBlank()) desc = firstLine.trim()
-                        } catch (e: Exception) {}
-                        list.add(SlashAction(name, desc, "Workflow"))
-                    }
-                }
-            }
-        }
-        return list
-    }
-
-    private suspend fun runAgyCapture(
-        context: Context,
-        args: List<String>,
-        timeoutMs: Long,
-    ): Pair<Int, String>? {
-        val sb = StringBuilder()
-        val wsDir = run {
-            val currentWorkspace = workspacePath.value
-            val dir = if (!currentWorkspace.isNullOrBlank()) File(currentWorkspace) else null
-            if (dir != null && dir.exists() && dir.isDirectory) dir else null
-        }
-        val exit = withTimeoutOrNull(timeoutMs) {
-            EngineExecutor.executeAgy(context, args, workingDir = wsDir) { line, isErr ->
-                sb.appendLine(line)
-            }
-        } ?: return null
-        if (exit != 0) return null
-        return exit to sb.toString()
-    }
-
-    private fun loadCachedSlashCommands(
-        prefs: SharedPreferences,
-    ): List<CliSlashCommand> {
-        val raw = prefs.getString(KEY_CLI_SLASH_COMMANDS, null) ?: return emptyList()
-        val out = ArrayList<CliSlashCommand>()
-        for (line in raw.lines()) {
-            if (line.isBlank()) continue
-            val tab = line.indexOf('\t')
-            if (tab <= 0) continue
-            out.add(CliSlashCommand(line.substring(0, tab), line.substring(tab + 1)))
-        }
-        return out
-    }
-
-    private fun saveCachedSlashCommands(
-        prefs: SharedPreferences,
-        commands: List<CliSlashCommand>,
-        version: String?,
-    ) {
-        val text = commands.joinToString("\n") { cmd ->
-            val desc = cmd.description.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ')
-            "${cmd.cmd}\t$desc"
-        }
-        prefs.edit()
-            .putString(KEY_CLI_SLASH_COMMANDS, text)
-            .putString(KEY_CLI_SLASH_VERSION, version)
-            .putLong(KEY_CLI_SLASH_FETCHED_AT, System.currentTimeMillis())
-            .apply()
     }
 
     fun sendMessage(context: Context, content: String, attachments: List<AttachedFile> = emptyList()) {
@@ -2396,6 +2322,8 @@ class AntigravityViewModel : ViewModel() {
                         } else {
                             context.getString(R.string.chat_inspection_finished)
                         }
+                    } else if (exitCode != 0) {
+                        context.getString(R.string.chat_core_execution_error, exitCode)
                     } else {
                         context.getString(R.string.chat_task_completed)
                     }

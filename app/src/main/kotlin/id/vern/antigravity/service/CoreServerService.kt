@@ -133,6 +133,9 @@ class CoreServerService : Service() {
         env["LD_LIBRARY_PATH"] = "${filesDir.absolutePath}/usr/lib:/system/lib64"
         env["AGY_APPLICATION_ID"] = packageName
         env["APPLICATION_ID"] = packageName
+        gatewayServer?.getToken()?.takeIf { it.isNotBlank() }?.let { token ->
+            env["AGY_GATEWAY_TOKEN"] = token
+        }
     }
 
     private fun startBackgroundDaemon() {

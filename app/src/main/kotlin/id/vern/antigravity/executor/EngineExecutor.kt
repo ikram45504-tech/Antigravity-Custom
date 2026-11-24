@@ -25,6 +25,15 @@ object EngineExecutor {
         isGitPermissionsSet = false
     }
 
+    private fun readGatewayToken(filesDir: File): String? {
+        return try {
+            val f = File(filesDir, id.vern.antigravity.gateway.SystemGatewayServer.TOKEN_FILE_NAME)
+            if (f.isFile) f.readText(Charsets.UTF_8).trim().takeIf { it.isNotEmpty() } else null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     suspend fun executeCommand(
         context: Context,
         command: String,
@@ -134,6 +143,7 @@ object EngineExecutor {
             env["AGY_APPLICATION_ID"] = context.packageName
             env["APPLICATION_ID"] = context.packageName
             env["ANTIGRAVITY_APP_DATA_DIR"] = File(homeDir, ".gemini/antigravity-cli").apply { mkdirs() }.absolutePath
+            readGatewayToken(filesDir)?.let { env["AGY_GATEWAY_TOKEN"] = it }
 
             val process = pb.start()
 
@@ -341,6 +351,7 @@ object EngineExecutor {
                 env["AGY_APPLICATION_ID"] = context.packageName
                 env["APPLICATION_ID"] = context.packageName
                 env["ANTIGRAVITY_APP_DATA_DIR"] = File(homeDir, ".gemini/antigravity-cli").apply { mkdirs() }.absolutePath
+                readGatewayToken(filesDir)?.let { env["AGY_GATEWAY_TOKEN"] = it }
 
                 streamProcess(pb, onOutputLine)
             } catch (e: Exception) {
@@ -395,6 +406,7 @@ object EngineExecutor {
                 env["AGY_APPLICATION_ID"] = context.packageName
                 env["APPLICATION_ID"] = context.packageName
                 env["ANTIGRAVITY_APP_DATA_DIR"] = File(homeDir, ".gemini/antigravity-cli").apply { mkdirs() }.absolutePath
+                readGatewayToken(filesDir)?.let { env["AGY_GATEWAY_TOKEN"] = it }
                 streamProcess(pb, onOutputLine)
             } catch (e: Exception) {
                 onOutputLine("Engine wrapper execution failed: ${e.message}", true)

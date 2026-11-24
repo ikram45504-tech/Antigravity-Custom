@@ -9,15 +9,19 @@ import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.system.Os
 import android.util.Log
 import android.widget.Toast
 import id.vern.antigravity.service.WakeLockHolder
 import org.json.JSONObject
 import java.io.BufferedReader
+import java.io.File
 import java.io.InputStreamReader
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.security.MessageDigest
+import java.security.SecureRandom
 import java.util.concurrent.Executors
 
 class SystemGatewayServer(
@@ -27,6 +31,8 @@ class SystemGatewayServer(
 ) {
     companion object {
         private const val TAG = "SystemGateway"
+        const val TOKEN_HEADER = "X-Gateway-Token"
+        const val TOKEN_FILE_NAME = ".gateway_token"
     }
 
     private val executor = Executors.newFixedThreadPool(3)
@@ -34,10 +40,29 @@ class SystemGatewayServer(
     private var serverSocket: ServerSocket? = null
     @Volatile
     private var running = false
+    @Volatile
+    private var authToken: String = generateAndPersistToken()
+
+    fun getToken(): String = authToken
+
+    private fun generateAndPersistToken(): String {
+        val bytes = ByteArray(32)
+        SecureRandom().nextBytes(bytes)
+        val token = bytes.joinToString("") { "%02x".format(it) }
+        try {
+            val tokenFile = File(context.filesDir, TOKEN_FILE_NAME)
+            tokenFile.writeText(token, Charsets.UTF_8)
+            try { Os.chmod(tokenFile.absolutePath, 384) } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not persist gateway token: ${e.message}")
+        }
+        return token
+    }
 
     @Synchronized
     fun start() {
         if (running) return
+        authToken = generateAndPersistToken()
         running = true
 
         executor.execute {
@@ -79,10 +104,13 @@ class SystemGatewayServer(
                 val rawPath = parts.getOrNull(1) ?: "/"
 
                 var contentLength = 0
+                var providedToken = ""
                 var headerLine = reader.readLine()
                 while (!headerLine.isNullOrEmpty()) {
                     if (headerLine.startsWith("Content-Length:", ignoreCase = true)) {
                         contentLength = headerLine.substringAfter(":").trim().toIntOrNull() ?: 0
+                    } else if (headerLine.startsWith("$TOKEN_HEADER:", ignoreCase = true)) {
+                        providedToken = headerLine.substringAfter(":").trim()
                     }
                     headerLine = reader.readLine()
                 }
@@ -98,11 +126,22 @@ class SystemGatewayServer(
                     String(buffer, 0, read)
                 } else ""
 
-                val responseJson = dispatch(rawPath, body)
+                val endpoint = rawPath.removePrefix("/").substringBefore("?").trim()
+                val isHealthCheck = endpoint.isEmpty() || endpoint == "health"
+                val tokenValid = providedToken.isNotEmpty() && MessageDigest.isEqual(
+                    providedToken.toByteArray(Charsets.UTF_8),
+                    authToken.toByteArray(Charsets.UTF_8)
+                )
+
+                val (statusLine, responseJson) = if (!isHealthCheck && !tokenValid) {
+                    "HTTP/1.1 401 Unauthorized" to JSONObject().put("ok", false).put("error", "Unauthorized")
+                } else {
+                    "HTTP/1.1 200 OK" to dispatch(rawPath, body)
+                }
                 val responseBytes = responseJson.toString().toByteArray(Charsets.UTF_8)
 
                 val out = client.getOutputStream()
-                val header = "HTTP/1.1 200 OK\r\n" +
+                val header = "$statusLine\r\n" +
                         "Content-Type: application/json; charset=utf-8\r\n" +
                         "Content-Length: ${responseBytes.size}\r\n" +
                         "Connection: close\r\n" +
@@ -136,17 +175,22 @@ class SystemGatewayServer(
                 result.put("toast", "shown")
             }
             "open_url" -> {
-                val url = json.optString("url")
-                if (url.isNotBlank()) {
+                val url = json.optString("url").trim()
+                val parsed = if (url.isNotBlank()) runCatching { Uri.parse(url) }.getOrNull() else null
+                val scheme = parsed?.scheme?.lowercase()
+                if (parsed != null && (scheme == "http" || scheme == "https")) {
                     mainHandler.post {
                         try {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                            val intent = Intent(Intent.ACTION_VIEW, parsed).apply {
                                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             }
                             context.startActivity(intent)
                         } catch (e: Exception) {}
                     }
                     result.put("opened", url)
+                } else if (url.isNotBlank()) {
+                    result.put("ok", false)
+                    result.put("error", "Unsupported URL scheme")
                 }
             }
             "clipboard" -> {

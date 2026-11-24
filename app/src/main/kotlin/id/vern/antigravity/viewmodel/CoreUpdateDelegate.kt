@@ -65,6 +65,7 @@ object CoreUpdateDelegate {
             return null
         }
         val current = CoreUpdateManager.getCurrentVersion(context)
+        val hasBackup = CoreUpdateManager.hasBackup(context)
         return try {
             val updateInfo = CoreUpdateManager.checkForUpdate(context)
             CoreEngineUpdateState(
@@ -73,6 +74,8 @@ object CoreUpdateDelegate {
                 latestVersion = updateInfo.version,
                 isUpdateAvailable = updateInfo.isUpdateAvailable,
                 downloadUrl = updateInfo.url,
+                sha512 = updateInfo.sha512,
+                hasBackup = hasBackup,
                 lastCheckedTime = System.currentTimeMillis(),
                 error = null
             )
@@ -81,6 +84,7 @@ object CoreUpdateDelegate {
             currentState.copy(
                 isChecking = false,
                 currentVersion = current,
+                hasBackup = hasBackup,
                 error = e.message ?: "Network error"
             )
         }
@@ -98,6 +102,7 @@ object CoreUpdateDelegate {
         val updateInfo = CoreUpdateInfo(
             version = latestVer,
             url = url,
+            sha512 = state.sha512,
             currentVersion = state.currentVersion,
             isUpdateAvailable = true
         )
@@ -115,5 +120,9 @@ object CoreUpdateDelegate {
             onOutputLine(TerminalLine(text = context.getString(R.string.core_update_failed, err), isError = true))
             onError(err)
         }
+    }
+
+    fun rollbackCoreEngine(context: Context): Result<String> {
+        return CoreUpdateManager.rollback(context)
     }
 }

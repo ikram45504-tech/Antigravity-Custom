@@ -11,6 +11,8 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
+import java.util.Base64
 import java.util.zip.GZIPInputStream
 import org.json.JSONObject
 
@@ -163,6 +165,14 @@ object CoreUpdateManager {
                 throw IllegalStateException("Failed downloading core engine after $maxAttempts attempts: ${lastDownloadError?.message}", lastDownloadError)
             }
 
+            if (updateInfo.sha512.isNotBlank()) {
+                onProgress(0.67f, "Verifying SHA-512 checksum...")
+                if (!verifySha512(tarGzFile, updateInfo.sha512)) {
+                    tarGzFile.delete()
+                    return Result.failure(SecurityException("Core package SHA-512 checksum verification failed"))
+                }
+            }
+
             onProgress(0.70f, "Extracting binary package...")
             var extracted = extractTarGzMember(tarGzFile, "antigravity", stagingFile)
             if (!extracted) {
@@ -250,11 +260,16 @@ object CoreUpdateManager {
                 return Result.failure(Exception("Smoke test failed: $verifyOut"))
             }
 
-            if (backupFile.exists()) backupFile.delete()
+            // Retain backupFile (bin/agy.bak) so the user can roll back if a newer Core breaks APK compatibility.
+            val verFile = File(engineDir, ".engine_version")
+            val verBackupFile = File(engineDir, ".engine_version.bak")
+            if (verFile.isFile) {
+                try { verFile.copyTo(verBackupFile, overwrite = true) } catch (_: Exception) {}
+            }
             if (stagingFile.exists()) stagingFile.delete()
             if (tarGzFile.exists()) tarGzFile.delete()
 
-            File(engineDir, ".engine_version").writeText(updateInfo.version)
+            verFile.writeText(updateInfo.version)
 
             onProgress(1.0f, "Core engine successfully updated to v${updateInfo.version}!")
             return Result.success(updateInfo.version)
@@ -264,6 +279,78 @@ object CoreUpdateManager {
                 backupFile.copyTo(agyBin, overwrite = true)
             }
             return Result.failure(e)
+        }
+    }
+
+    fun hasBackup(context: Context): Boolean {
+        val engineDir = BootstrapInstaller.engineDir(context)
+        val backupFile = File(engineDir, "bin/agy.bak")
+        return backupFile.isFile && backupFile.length() > 1_000_000L
+    }
+
+    fun rollback(context: Context): Result<String> {
+        val engineDir = BootstrapInstaller.engineDir(context)
+        val agyBin = File(engineDir, "bin/agy")
+        val backupFile = File(engineDir, "bin/agy.bak")
+        if (!backupFile.isFile) {
+            return Result.failure(IllegalStateException("No Core backup binary found"))
+        }
+        return try {
+            val prevStaging = File(context.cacheDir, "agy.rollback.tmp")
+            if (agyBin.isFile) {
+                agyBin.copyTo(prevStaging, overwrite = true)
+            }
+            backupFile.copyTo(agyBin, overwrite = true)
+            agyBin.setReadable(true, false)
+            agyBin.setExecutable(true, false)
+            try { Os.chmod(agyBin.absolutePath, 493) } catch (_: Exception) {}
+
+            val tmpAgy = File(context.filesDir, "tmp/engine/bin/agy")
+            if (tmpAgy.parentFile?.exists() == true) {
+                try {
+                    agyBin.copyTo(tmpAgy, overwrite = true)
+                    tmpAgy.setReadable(true, false)
+                    tmpAgy.setExecutable(true, false)
+                    try { Os.chmod(tmpAgy.absolutePath, 493) } catch (_: Exception) {}
+                } catch (_: Exception) {}
+            }
+
+            val verFile = File(engineDir, ".engine_version")
+            val verBackupFile = File(engineDir, ".engine_version.bak")
+            if (verBackupFile.isFile) {
+                try { verBackupFile.copyTo(verFile, overwrite = true) } catch (_: Exception) {}
+            }
+            if (prevStaging.exists()) prevStaging.delete()
+
+            val restoredVersion = getCurrentVersion(context)
+            verFile.writeText(restoredVersion)
+            Result.success(restoredVersion)
+        } catch (e: Exception) {
+            Log.e(TAG, "Rollback failed: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    internal fun verifySha512(file: File, expectedHash: String): Boolean {
+        val expected = expectedHash.trim()
+        if (expected.isEmpty() || !file.isFile) return false
+        return try {
+            val digest = MessageDigest.getInstance("SHA-512")
+            FileInputStream(file).use { fis ->
+                val buf = ByteArray(65536)
+                var read: Int
+                while (fis.read(buf).also { read = it } != -1) {
+                    digest.update(buf, 0, read)
+                }
+            }
+            val actualBytes = digest.digest()
+            val actualHex = actualBytes.joinToString("") { "%02x".format(it) }
+            val actualBase64 = Base64.getEncoder().encodeToString(actualBytes)
+            val normalizedExpected = expected.removePrefix("sha512-").trim()
+            actualHex.equals(normalizedExpected, ignoreCase = true) || actualBase64 == normalizedExpected
+        } catch (e: Exception) {
+            Log.w(TAG, "SHA-512 computation failed: ${e.message}")
+            false
         }
     }
 
