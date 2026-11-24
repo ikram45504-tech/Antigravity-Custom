@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.LruCache
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -32,8 +33,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -68,6 +73,33 @@ private val NUM_REGEX = Regex("""^(\d+)\.\s+(.*)$""")
 private val BULLET_PREFIX_REGEX = Regex("""^[-*+]\s+""")
 private val NUM_PREFIX_REGEX = Regex("""^\d+\.\s+""")
 private val INLINE_TOKEN_REGEX = Regex("""(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))""")
+
+private const val ASYNC_MARKDOWN_THRESHOLD = 2000
+private const val MAX_CACHEABLE_MARKDOWN_LENGTH = 65536
+private val markdownElementCache = LruCache<String, List<MarkdownElement>>(64)
+private val inlineAnnotatedCache = LruCache<String, AnnotatedString>(256)
+
+fun parseMarkdownCached(content: String): List<MarkdownElement> {
+    if (content.length <= MAX_CACHEABLE_MARKDOWN_LENGTH) {
+        markdownElementCache.get(content)?.let { return it }
+    }
+    val parsed = parseMarkdown(content)
+    if (content.length <= MAX_CACHEABLE_MARKDOWN_LENGTH) {
+        markdownElementCache.put(content, parsed)
+    }
+    return parsed
+}
+
+private fun parseInlineMarkdownCached(text: String): AnnotatedString {
+    if (text.length <= MAX_CACHEABLE_MARKDOWN_LENGTH) {
+        inlineAnnotatedCache.get(text)?.let { return it }
+    }
+    val parsed = parseInlineMarkdown(text)
+    if (text.length <= MAX_CACHEABLE_MARKDOWN_LENGTH) {
+        inlineAnnotatedCache.put(text, parsed)
+    }
+    return parsed
+}
 
 fun parseMarkdown(content: String): List<MarkdownElement> {
     val elements = mutableListOf<MarkdownElement>()
@@ -280,10 +312,33 @@ fun MarkdownText(
     textColor: Color = MaterialTheme.colorScheme.onSurface,
     fontSize: TextUnit = 12.sp,
     lineHeight: TextUnit = 17.sp,
-    selectable: Boolean = true
+    selectable: Boolean = false
 ) {
     val context = LocalContext.current
-    val elements = remember(markdown) { parseMarkdown(markdown) }
+    val elements = if (markdown.length <= ASYNC_MARKDOWN_THRESHOLD) {
+        remember(markdown) { parseMarkdownCached(markdown) }
+    } else {
+        val cached = remember(markdown) { markdownElementCache.get(markdown) }
+        val asyncElements by produceState<List<MarkdownElement>?>(initialValue = cached, key1 = markdown) {
+            value = cached ?: withContext(Dispatchers.Default) {
+                parseMarkdownCached(markdown)
+            }
+        }
+        asyncElements
+    }
+
+    if (elements == null) {
+        Text(
+            text = markdown,
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = fontSize,
+                lineHeight = lineHeight,
+                color = textColor
+            ),
+            modifier = modifier
+        )
+        return
+    }
 
     val markdownBody = @Composable {
         Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -297,7 +352,7 @@ fun MarkdownText(
                                 3 -> 13.sp to FontWeight.SemiBold
                                 else -> 12.sp to FontWeight.SemiBold
                             }
-                            val annotated = remember(element.text) { parseInlineMarkdown(element.text) }
+                            val annotated = remember(element.text) { parseInlineMarkdownCached(element.text) }
                             FormattedText(
                                 annotatedString = annotated,
                                 style = MaterialTheme.typography.titleMedium.copy(
@@ -323,7 +378,7 @@ fun MarkdownText(
                         }
 
                         is MarkdownElement.ListItem -> {
-                            val annotated = remember(element.text) { parseInlineMarkdown(element.text) }
+                            val annotated = remember(element.text) { parseInlineMarkdownCached(element.text) }
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -351,7 +406,7 @@ fun MarkdownText(
                         }
 
                         is MarkdownElement.BlockQuote -> {
-                            val annotated = remember(element.text) { parseInlineMarkdown(element.text) }
+                            val annotated = remember(element.text) { parseInlineMarkdownCached(element.text) }
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -384,7 +439,7 @@ fun MarkdownText(
                         }
 
                         is MarkdownElement.Paragraph -> {
-                            val annotated = remember(element.text) { parseInlineMarkdown(element.text) }
+                            val annotated = remember(element.text) { parseInlineMarkdownCached(element.text) }
                             FormattedText(
                                 annotatedString = annotated,
                                 style = MaterialTheme.typography.bodyMedium.copy(

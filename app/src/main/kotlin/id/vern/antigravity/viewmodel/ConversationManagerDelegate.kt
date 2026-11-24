@@ -5,11 +5,13 @@ import id.vern.antigravity.AntigravityApp
 import id.vern.antigravity.data.ChatMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 class ConversationManagerDelegate {
@@ -24,6 +26,8 @@ class ConversationManagerDelegate {
 
     private val mutableIsConversationPinned = MutableStateFlow(false)
     val isConversationPinned: StateFlow<Boolean> = mutableIsConversationPinned.asStateFlow()
+
+    private var loadMessagesJob: Job? = null
 
     fun saveConversationHistory(context: Context) {
         ConversationPersistence.saveConversationHistory(context, mutableConversationHistory.value)
@@ -50,28 +54,37 @@ class ConversationManagerDelegate {
 
     fun loadConversationHistory(
         context: Context,
+        scope: CoroutineScope,
         onWorkspaceChange: (String) -> Unit,
         onMessagesLoaded: (List<ChatMessage>) -> Unit
     ) {
-        val list = ConversationPersistence.loadConversationHistory(context)
-        mutableConversationHistory.value = list
+        loadMessagesJob?.cancel()
+        loadMessagesJob = scope.launch(Dispatchers.IO) {
+            val list = ConversationPersistence.loadConversationHistory(context)
+            mutableConversationHistory.value = list
 
-        val lastActiveId = ConversationPersistence.getLastActiveConversationId(context)
-        val activeSummary = list.firstOrNull { it.id == lastActiveId } ?: list.firstOrNull()
-        if (activeSummary != null) {
-            mutableActiveConversationId.value = activeSummary.id
-            mutableConversationTitle.value = activeSummary.title
-            mutableIsConversationPinned.value = activeSummary.isPinned
-            if (!activeSummary.projectPath.isNullOrBlank()) {
-                onWorkspaceChange(activeSummary.projectPath)
+            val lastActiveId = ConversationPersistence.getLastActiveConversationId(context)
+            val activeSummary = list.firstOrNull { it.id == lastActiveId } ?: list.firstOrNull()
+            if (activeSummary != null) {
+                mutableActiveConversationId.value = activeSummary.id
+                mutableConversationTitle.value = activeSummary.title
+                mutableIsConversationPinned.value = activeSummary.isPinned
+                val loadedMessages = loadMessagesForConversation(context, activeSummary.id)
+                saveLastActiveConversationId(context, activeSummary.id)
+                withContext(Dispatchers.Main) {
+                    if (!activeSummary.projectPath.isNullOrBlank()) {
+                        onWorkspaceChange(activeSummary.projectPath)
+                    }
+                    onMessagesLoaded(loadedMessages)
+                }
+            } else {
+                mutableActiveConversationId.value = null
+                mutableConversationTitle.value = "New Conversation"
+                mutableIsConversationPinned.value = false
+                withContext(Dispatchers.Main) {
+                    onMessagesLoaded(emptyList())
+                }
             }
-            onMessagesLoaded(loadMessagesForConversation(context, activeSummary.id))
-            saveLastActiveConversationId(context, activeSummary.id)
-        } else {
-            mutableActiveConversationId.value = null
-            mutableConversationTitle.value = "New Conversation"
-            mutableIsConversationPinned.value = false
-            onMessagesLoaded(emptyList())
         }
     }
 
@@ -83,6 +96,7 @@ class ConversationManagerDelegate {
         onWorkspaceChange: (String) -> Unit,
         onClearState: () -> Unit
     ) {
+        loadMessagesJob?.cancel()
         val currentId = mutableActiveConversationId.value
         if (context != null && currentId != null && currentMessages.isNotEmpty()) {
             saveMessagesForConversation(context, currentId, currentMessages, scope)
@@ -108,6 +122,7 @@ class ConversationManagerDelegate {
         onMessagesLoaded: (List<ChatMessage>) -> Unit,
         onLog: (String, String) -> Unit
     ) {
+        loadMessagesJob?.cancel()
         val currentId = mutableActiveConversationId.value
         if (currentId != null && currentMessages.isNotEmpty()) {
             saveMessagesForConversation(context, currentId, currentMessages, scope)
@@ -118,9 +133,14 @@ class ConversationManagerDelegate {
         if (!summary.projectPath.isNullOrBlank()) {
             onWorkspaceChange(summary.projectPath)
         }
-        onMessagesLoaded(loadMessagesForConversation(context, summary.id))
-        saveLastActiveConversationId(context, summary.id)
-        onLog("Conversation", "Switched to conversation: ${summary.title}")
+        loadMessagesJob = scope.launch(Dispatchers.IO) {
+            val loaded = loadMessagesForConversation(context, summary.id)
+            saveLastActiveConversationId(context, summary.id)
+            withContext(Dispatchers.Main) {
+                onMessagesLoaded(loaded)
+                onLog("Conversation", "Switched to conversation: ${summary.title}")
+            }
+        }
     }
 
     fun loadConversation(

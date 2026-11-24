@@ -5,10 +5,13 @@ import android.net.Uri
 import android.os.Environment
 import id.vern.antigravity.data.ProjectSortOrder
 import id.vern.antigravity.service.TerminalSessionManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import java.io.File
 
 class ProjectWorkspaceDelegate {
@@ -21,9 +24,16 @@ class ProjectWorkspaceDelegate {
     private val mutableWorkspacePath = MutableStateFlow("")
     val workspacePath: StateFlow<String> = mutableWorkspacePath.asStateFlow()
 
-    fun loadProjects(context: Context) {
-        val sorted = ProjectPersistence.loadProjects(context, mutableProjectSortOrder.value)
-        mutableProjectList.value = sorted
+    fun loadProjects(context: Context, scope: CoroutineScope? = null) {
+        if (scope != null) {
+            scope.launch(Dispatchers.IO) {
+                val sorted = ProjectPersistence.loadProjects(context, mutableProjectSortOrder.value)
+                mutableProjectList.value = sorted
+            }
+        } else {
+            val sorted = ProjectPersistence.loadProjects(context, mutableProjectSortOrder.value)
+            mutableProjectList.value = sorted
+        }
     }
 
     fun saveProjects(context: Context, list: List<File>) {

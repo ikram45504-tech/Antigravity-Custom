@@ -810,7 +810,7 @@ class AntigravityViewModel : ViewModel() {
     fun disconnectGitHub(context: Context) =
         authDelegate.disconnectGitHub(context, ::addLog)
 
-    fun loadProjects(context: Context) = projectWorkspaceDelegate.loadProjects(context)
+    fun loadProjects(context: Context) = projectWorkspaceDelegate.loadProjects(context, viewModelScope)
     fun saveProjects(context: Context, list: List<File>) = projectWorkspaceDelegate.saveProjects(context, list)
     fun addProject(context: Context, path: String): File = projectWorkspaceDelegate.addProject(context, path, ::addLog)
     fun removeProject(context: Context, path: String) = projectWorkspaceDelegate.removeProject(context, path, ::addLog)
@@ -830,6 +830,7 @@ class AntigravityViewModel : ViewModel() {
     fun loadConversationHistory(context: Context) =
         conversationManagerDelegate.loadConversationHistory(
             context = context,
+            scope = viewModelScope,
             onWorkspaceChange = { setWorkspacePath(context, it) },
             onMessagesLoaded = { mutableChatMessages.value = it }
         )
@@ -1305,11 +1306,15 @@ class AntigravityViewModel : ViewModel() {
             isPinned = false,
             projectPath = workspacePath.value
         )
-        val history = ConversationPersistence.loadConversationHistory(context)
-        if (history.none { it.id == convId }) {
-            ConversationPersistence.saveConversationHistory(context, listOf(summary) + history)
+        viewModelScope.launch(Dispatchers.IO) {
+            val history = ConversationPersistence.loadConversationHistory(context)
+            if (history.none { it.id == convId }) {
+                ConversationPersistence.saveConversationHistory(context, listOf(summary) + history)
+            }
+            withContext(Dispatchers.Main) {
+                loadConversation(context, summary)
+            }
         }
-        loadConversation(context, summary)
     }
 
     fun loadDaemonTasks(context: Context) {

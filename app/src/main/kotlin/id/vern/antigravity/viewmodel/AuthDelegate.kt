@@ -81,25 +81,27 @@ class AuthDelegate {
         scope: CoroutineScope,
         onRefreshUserQuota: (Context) -> Unit
     ) {
-        OAuthManager.checkAndImportExistingToken(context)
-        mutableGithubAccount.value = GitHubAuthManager.getAccount(context)
-        val allAccounts = AccountManager.getAccounts(context)
-        mutableAccounts.value = allAccounts
-        val email = OAuthManager.getUserEmail(context)
-        mutableUserEmail.value = email
-        val name = OAuthManager.getUserName(context) ?: if (email != null) {
-            email.substringBefore("@").replace(".", " ").split(" ")
-                .joinToString(" ") { word -> word.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() } }
-        } else ""
-        mutableUserName.value = name
-        val pic = OAuthManager.getUserPicture(context)
-        if (!pic.isNullOrBlank()) {
-            mutableUserPicture.value = pic
-        }
+        scope.launch(Dispatchers.IO) {
+            OAuthManager.checkAndImportExistingToken(context)
+            mutableGithubAccount.value = GitHubAuthManager.getAccount(context)
+            val allAccounts = AccountManager.getAccounts(context)
+            mutableAccounts.value = allAccounts
+            val email = OAuthManager.getUserEmail(context)
+            mutableUserEmail.value = email
+            val name = OAuthManager.getUserName(context) ?: if (email != null) {
+                email.substringBefore("@").replace(".", " ").split(" ")
+                    .joinToString(" ") { word -> word.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() } }
+            } else ""
+            mutableUserName.value = name
+            val pic = OAuthManager.getUserPicture(context)
+            if (!pic.isNullOrBlank()) {
+                mutableUserPicture.value = pic
+            }
 
-        onRefreshUserQuota(context)
+            withContext(Dispatchers.Main) {
+                onRefreshUserQuota(context)
+            }
 
-        scope.launch {
             if (OAuthManager.refreshTokenIfNeeded(context)) {
                 val newEmail = OAuthManager.getUserEmail(context)
                 mutableUserEmail.value = newEmail
@@ -113,7 +115,9 @@ class AuthDelegate {
                     mutableUserPicture.value = refreshedPic
                 }
                 if (newEmail != null) {
-                    onRefreshUserQuota(context)
+                    withContext(Dispatchers.Main) {
+                        onRefreshUserQuota(context)
+                    }
                 }
             }
             val userInfo = OAuthManager.fetchUserInfo(context)
@@ -235,22 +239,22 @@ class AuthDelegate {
         onAccountChangeDetected: (String) -> Unit
     ) {
         onCheckUpdates(context)
-        OAuthManager.checkAndImportExistingToken(context)
-        val email = OAuthManager.getUserEmail(context)
-        if (email != null && email != mutableUserEmail.value) {
-            mutableUserEmail.value = email
-            onAccountChangeDetected(email)
-        } else if (email != null) {
-            if (mutableUserPicture.value.isNullOrBlank()) {
+        scope.launch(Dispatchers.IO) {
+            OAuthManager.checkAndImportExistingToken(context)
+            val email = OAuthManager.getUserEmail(context)
+            if (email != null && email != mutableUserEmail.value) {
+                mutableUserEmail.value = email
+                withContext(Dispatchers.Main) {
+                    onAccountChangeDetected(email)
+                }
+            } else if (email != null && mutableUserPicture.value.isNullOrBlank()) {
                 val pic = OAuthManager.getUserPicture(context)
                 if (!pic.isNullOrBlank()) {
                     mutableUserPicture.value = pic
                 } else {
-                    scope.launch {
-                        val userInfo = OAuthManager.fetchUserInfo(context)
-                        if (!userInfo?.picture.isNullOrBlank()) {
-                            mutableUserPicture.value = userInfo?.picture
-                        }
+                    val userInfo = OAuthManager.fetchUserInfo(context)
+                    if (!userInfo?.picture.isNullOrBlank()) {
+                        mutableUserPicture.value = userInfo?.picture
                     }
                 }
             }

@@ -79,8 +79,10 @@ class CoreServerService : Service() {
             }
             ACTION_RESTART -> {
                 Log.i(TAG, "Restart action requested")
-                stopBackgroundDaemon()
-                startBackgroundDaemon()
+                serviceScope.launch {
+                    stopBackgroundDaemonInternal()
+                    startBackgroundDaemonInternal()
+                }
                 ForegroundNotification.update(this, getString(R.string.notification_engine_running))
             }
             else -> {
@@ -96,7 +98,12 @@ class CoreServerService : Service() {
         Log.i(TAG, "Destroying CoreServerService...")
         dismissNotification()
         serviceScope.cancel()
-        stopBackgroundDaemon()
+        Thread {
+            stopBackgroundDaemonInternal()
+        }.apply {
+            isDaemon = true
+            start()
+        }
         gatewayServer?.stop()
         wakeLockHolder.release()
         AppLogger.d("Engine", "CoreServerService stopped")
@@ -118,30 +125,40 @@ class CoreServerService : Service() {
         }
     }
 
+    private fun configureDaemonEnv(pb: ProcessBuilder, homeDir: File) {
+        val env = pb.environment()
+        env["PATH"] = "${filesDir.absolutePath}/usr/bin:${filesDir.absolutePath}/engine/bin:/system/bin"
+        env["HOME"] = homeDir.absolutePath
+        env["PREFIX"] = "${filesDir.absolutePath}/usr"
+        env["LD_LIBRARY_PATH"] = "${filesDir.absolutePath}/usr/lib:/system/lib64"
+        env["AGY_APPLICATION_ID"] = packageName
+        env["APPLICATION_ID"] = packageName
+    }
+
     private fun startBackgroundDaemon() {
         serviceScope.launch {
-            try {
-                delay(1500)
-                val daemonBin = File(filesDir, "usr/bin/agy-daemon")
-                if (daemonBin.canExecute()) {
-                    Log.i(TAG, "Starting autonomous background daemon...")
-                    val homeDir = File(filesDir, "home").apply { mkdirs() }
-                    val pb = ProcessBuilder(daemonBin.absolutePath, "start")
-                    pb.directory(homeDir)
-                    pb.environment()["PATH"] = "${filesDir.absolutePath}/usr/bin:${filesDir.absolutePath}/engine/bin:/system/bin"
-                    pb.environment()["HOME"] = homeDir.absolutePath
-                    pb.environment()["PREFIX"] = "${filesDir.absolutePath}/usr"
-                    pb.environment()["AGY_APPLICATION_ID"] = packageName
-                    pb.environment()["APPLICATION_ID"] = packageName
-                    pb.start()
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to launch agy-daemon: ${e.message}")
-            }
+            delay(1500)
+            startBackgroundDaemonInternal()
         }
     }
 
-    private fun stopBackgroundDaemon() {
+    private fun startBackgroundDaemonInternal() {
+        try {
+            val daemonBin = File(filesDir, "usr/bin/agy-daemon")
+            if (daemonBin.canExecute()) {
+                Log.i(TAG, "Starting autonomous background daemon...")
+                val homeDir = File(filesDir, "home").apply { mkdirs() }
+                val pb = ProcessBuilder(daemonBin.absolutePath, "start")
+                pb.directory(homeDir)
+                configureDaemonEnv(pb, homeDir)
+                pb.start()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to launch agy-daemon: ${e.message}")
+        }
+    }
+
+    private fun stopBackgroundDaemonInternal() {
         try {
             val daemonBin = File(filesDir, "usr/bin/agy-daemon")
             if (daemonBin.canExecute()) {
@@ -149,8 +166,7 @@ class CoreServerService : Service() {
                 val homeDir = File(filesDir, "home").apply { mkdirs() }
                 val pb = ProcessBuilder(daemonBin.absolutePath, "stop")
                 pb.directory(homeDir)
-                pb.environment()["PATH"] = "${filesDir.absolutePath}/usr/bin:${filesDir.absolutePath}/engine/bin:/system/bin"
-                pb.environment()["HOME"] = homeDir.absolutePath
+                configureDaemonEnv(pb, homeDir)
                 val p = pb.start()
                 if (!p.waitFor(1500, TimeUnit.MILLISECONDS)) {
                     p.destroyForcibly()

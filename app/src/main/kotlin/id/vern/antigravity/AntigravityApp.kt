@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.app.Application
 import android.content.Context
 import android.os.Process
+import android.os.StrictMode
 import android.util.Log
 import id.vern.antigravity.ui.CrashHandlerActivity
 import java.io.File
@@ -25,6 +26,15 @@ class AntigravityApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        if (BuildConfig.DEBUG) {
+            StrictMode.setThreadPolicy(
+                StrictMode.ThreadPolicy.Builder()
+                    .detectDiskReads()
+                    .detectDiskWrites()
+                    .penaltyLog()
+                    .build()
+            )
+        }
         setupCrashHandler()
         Log.i(TAG, "Antigravity App initialized with crash handler.")
     }

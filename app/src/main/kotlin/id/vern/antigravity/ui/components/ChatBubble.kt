@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
@@ -111,6 +112,7 @@ fun ChatBubble(
     if (isUser) {
         val isLongPrompt = isPinnedExecuting && (message.content.length > 80 || message.content.count { it == '\n' } >= 2)
         var isExpanded by remember(message.id) { mutableStateOf(false) }
+        var isSelectionEnabled by remember(message.id) { mutableStateOf(false) }
         val chevronRotation by animateFloatAsState(
             targetValue = if (isExpanded) 180f else 0f,
             animationSpec = tween(250, easing = FastOutSlowInEasing),
@@ -133,7 +135,7 @@ fun ChatBubble(
                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
                         shape = RoundedCornerShape(18.dp)
                     )
-                    .animateContentSize(),
+                    .then(if (isLongPrompt) Modifier.animateContentSize() else Modifier),
                 tonalElevation = 1.dp
             ) {
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
@@ -230,7 +232,7 @@ fun ChatBubble(
                                 textColor = MaterialTheme.colorScheme.onSurface,
                                 fontSize = 12.sp,
                                 lineHeight = 17.sp,
-                                selectable = message.status == MessageStatus.SENT
+                                selectable = isSelectionEnabled && message.status == MessageStatus.SENT
                             )
                         }
                     }
@@ -285,6 +287,24 @@ fun ChatBubble(
                                 )
                             }
                             Spacer(modifier = Modifier.width(6.dp))
+                        }
+
+                        if (message.status == MessageStatus.SENT && !(isPinnedExecuting && isLongPrompt && !isExpanded)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable { isSelectionEnabled = !isSelectionEnabled }
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.SelectAll,
+                                    contentDescription = null,
+                                    tint = if (isSelectionEnabled) AntigravityBlue else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(13.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
                         }
 
                         Row(
@@ -686,22 +706,41 @@ fun ChatBubble(
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
                     modifier = Modifier.widthIn(max = 600.dp)
                 ) {
+                    var isSelectionEnabled by remember(message.id) { mutableStateOf(false) }
                     Column(modifier = Modifier.padding(14.dp)) {
                         MarkdownText(
                             markdown = message.content,
                             textColor = MaterialTheme.colorScheme.onSurface,
                             fontSize = 12.sp,
                             lineHeight = 17.sp,
-                            selectable = message.status == MessageStatus.SENT
+                            selectable = isSelectionEnabled && message.status == MessageStatus.SENT
                         )
 
                         val toastCopiedMsg = stringResource(R.string.chat_toast_copied)
                         Row(
                             horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(top = 8.dp)
                         ) {
+                            if (message.status == MessageStatus.SENT) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable { isSelectionEnabled = !isSelectionEnabled }
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.SelectAll,
+                                        contentDescription = null,
+                                        tint = if (isSelectionEnabled) AntigravityBlue else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(4.dp))
+                            }
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier

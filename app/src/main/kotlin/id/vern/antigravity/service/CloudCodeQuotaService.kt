@@ -23,6 +23,7 @@ import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.time.Duration
 import java.time.Instant
+import java.util.concurrent.TimeUnit
 import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLContext
@@ -100,6 +101,32 @@ object CloudCodeQuotaService {
         } ?: "curl"
     }
 
+    private fun createCurlProcessBuilder(context: Context?, vararg args: String): ProcessBuilder {
+        val curlBin = findCurlBinary(context)
+        val pb = ProcessBuilder(listOf(curlBin) + args.toList()).redirectErrorStream(true)
+        val env = pb.environment()
+        val ldPaths = mutableListOf<String>()
+        if (context != null) {
+            val usrLib = File(context.filesDir, "usr/lib")
+            if (usrLib.exists()) ldPaths.add(usrLib.absolutePath)
+            val parentUsrLib = context.filesDir.parentFile?.let { File(it, "files/usr/lib") }
+            if (parentUsrLib != null && parentUsrLib.exists()) ldPaths.add(parentUsrLib.absolutePath)
+            val certFile = File(context.filesDir, "usr/etc/tls/cert.pem")
+            if (certFile.exists()) {
+                env["CURL_CA_BUNDLE"] = certFile.absolutePath
+                env["SSL_CERT_FILE"] = certFile.absolutePath
+            }
+            env["PREFIX"] = File(context.filesDir, "usr").absolutePath
+        }
+        val prefix = System.getenv("PREFIX")
+        if (!prefix.isNullOrBlank()) {
+            ldPaths.add("$prefix/lib")
+        }
+        ldPaths.add("/system/lib64")
+        env["LD_LIBRARY_PATH"] = ldPaths.distinct().joinToString(":")
+        return pb
+    }
+
     private fun fetchCsrfTokenFromPort(port: Int, context: Context? = null): String? {
         val schemes = listOf("https", "http")
         for (scheme in schemes) {
@@ -129,13 +156,14 @@ object CloudCodeQuotaService {
         }
 
         try {
-            val curlBin = findCurlBinary(context)
-            val process = ProcessBuilder(
-                curlBin, "-k", "-s", "--max-time", "3",
+            val process = createCurlProcessBuilder(
+                context, "-k", "-s", "--max-time", "3",
                 "https://127.0.0.1:$port/"
-            ).redirectErrorStream(true).start()
+            ).start()
             val html = process.inputStream.bufferedReader().use { it.readText() }
-            process.waitFor()
+            if (!process.waitFor(4, TimeUnit.SECONDS)) {
+                process.destroyForcibly()
+            }
             val tokenRegex = Regex("""\"?csrfToken\"?\s*:\s*\"([^\"]+)\"""")
             val altRegex = Regex("""\"?csrf_token\"?\s*:\s*\"([^\"]+)\"""")
             val token = tokenRegex.find(html)?.groupValues?.get(1)
@@ -236,9 +264,8 @@ object CloudCodeQuotaService {
 
     private fun queryLocalEndpointViaCurl(port: Int, csrf: String, rpcPath: String = "RetrieveUserQuotaSummary", requestBody: String = "{}", context: Context? = null): String? {
         return try {
-            val curlBin = findCurlBinary(context)
-            val process = ProcessBuilder(
-                curlBin,
+            val process = createCurlProcessBuilder(
+                context,
                 "-k", "-s",
                 "--max-time", "5",
                 "-X", "POST",
@@ -247,9 +274,13 @@ object CloudCodeQuotaService {
                 "-H", "Connect-Protocol-Version: 1",
                 "-d", requestBody,
                 "https://127.0.0.1:$port/exa.language_server_pb.LanguageServerService/$rpcPath"
-            ).redirectErrorStream(true).start()
+            ).start()
             val output = process.inputStream.bufferedReader().use { it.readText() }
-            val exitCode = process.waitFor()
+            val finished = process.waitFor(6, TimeUnit.SECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+            }
+            val exitCode = if (finished) process.exitValue() else -1
             if (exitCode == 0 && output.isNotBlank() && (output.contains("\"groups\"") || output.contains("\"models\""))) {
                 Log.i(TAG, "curl query succeeded for local server port $port ($rpcPath)")
                 output
