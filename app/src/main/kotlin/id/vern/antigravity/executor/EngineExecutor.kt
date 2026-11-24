@@ -241,10 +241,17 @@ object EngineExecutor {
 
             val gitConfig = File(homeDir, ".gitconfig")
             val safeLine = "[safe]\n\tdirectory = *\n"
+            val sslLine = "[http]\n\tsslCAInfo = ${certFile.absolutePath}\n"
             if (!gitConfig.exists()) {
-                gitConfig.writeText(safeLine)
-            } else if (!gitConfig.readText().contains("directory = *")) {
-                gitConfig.appendText("\n$safeLine")
+                gitConfig.writeText("$safeLine\n$sslLine")
+            } else {
+                val currentConfig = gitConfig.readText()
+                if (!currentConfig.contains("directory = *")) {
+                    gitConfig.appendText("\n$safeLine")
+                }
+                if (!currentConfig.contains("sslCAInfo")) {
+                    gitConfig.appendText("\n$sslLine")
+                }
             }
 
             val rootConfig = File(filesDir, ".gemini/config")

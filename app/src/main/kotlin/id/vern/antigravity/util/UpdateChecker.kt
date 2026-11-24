@@ -30,8 +30,8 @@ class UpdateChecker(private val context: Context) {
     companion object {
         const val OTA_NOTIFICATION_CHANNEL_ID = "ota_updates_channel"
         const val OTA_NOTIFICATION_ID = 1009
-        const val GITHUB_OWNER = "KuatoDev"
-        const val GITHUB_REPO = "Antigravity"
+        const val GITHUB_OWNER = "ikram45504-tech"
+        const val GITHUB_REPO = "Antigravity-Custom"
     }
 
     private fun fetchGitHubApi(apiUrl: String): Pair<Int, String?> {

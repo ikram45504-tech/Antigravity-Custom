@@ -170,7 +170,7 @@
     <string name="about_modules_header">Core Architecture Modules</string>
     <string name="about_libraries_header">Libraries &amp; Runtime</string>
     <string name="about_btn_open_repo">Open on GitHub</string>
-    <string name="about_repo_name">KuatoDev/Antigravity</string>
+    <string name="about_repo_name">ikram45504-tech/Antigravity-Custom</string>
     <string name="about_repo_desc">Native Android client for Google Antigravity</string>
     <string name="about_contrib_vern_title">Vern (KuatoDev)</string>
     <string name="about_contrib_vern_desc">Android application architecture, native Kotlin implementation, Jetpack Compose UI, and Google OAuth flow.</string>

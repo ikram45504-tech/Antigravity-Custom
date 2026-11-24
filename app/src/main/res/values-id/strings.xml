@@ -170,7 +170,7 @@
     <string name="about_modules_header">Modul Arsitektur Utama</string>
     <string name="about_libraries_header">Library &amp; Runtime Environment</string>
     <string name="about_btn_open_repo">Buka di GitHub</string>
-    <string name="about_repo_name">KuatoDev/Antigravity</string>
+    <string name="about_repo_name">ikram45504-tech/Antigravity-Custom</string>
     <string name="about_repo_desc">Aplikasi Android native untuk Google Antigravity</string>
     <string name="about_contrib_vern_title">Vern (KuatoDev)</string>
     <string name="about_contrib_vern_desc">Arsitektur aplikasi Android, implementasi Kotlin, UI Jetpack Compose, dan integrasi Google OAuth.</string>

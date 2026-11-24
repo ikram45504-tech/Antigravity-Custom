@@ -5356,7 +5356,7 @@ fun AboutSettingsPage(
                     ) {
                         OutlinedButton(
                             onClick = {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/KuatoDev/Antigravity"))
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/ikram45504-tech/Antigravity-Custom"))
                                 context.startActivity(intent)
                             },
                             shape = RoundedCornerShape(8.dp),
