@@ -53,6 +53,8 @@ jobs:
 
       - name: Surface compile/test failures as annotations
         if: steps.unit_tests.outcome != 'success'
+        # Best-effort reporting only: never let this step hide the real failure.
+        continue-on-error: true
         run: |
           set -uo pipefail
           echo "### Unit test / compile failures" >> "$GITHUB_STEP_SUMMARY"

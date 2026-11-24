@@ -18,8 +18,8 @@ if (envSdk != null) {
   if (isWindows) {
     if (currentSdk.isNullOrBlank() || !java.io.File(currentSdk).exists() || !currentSdk.contains(":")) {
       val foundSdk = listOfNotNull(
-        System.getenv("LOCALAPPDATA")?.let { "$it\Android\Sdk" },
-        "${System.getProperty("user.home")}\AppData\Local\Android\Sdk"
+        System.getenv("LOCALAPPDATA")?.let { "$it\\Android\\Sdk" },
+        "${System.getProperty("user.home")}\\AppData\\Local\\Android\\Sdk"
       ).firstOrNull { java.io.File(it).exists() }
       if (foundSdk != null) {
         props.setProperty("sdk.dir", foundSdk)
