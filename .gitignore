@@ -1,0 +1,39 @@
+# ---- Signing material (never commit) ----
+*.keystore
+*.jks
+keystore.properties
+signing.properties
+local.properties
+
+# ---- Gradle / build output ----
+.gradle/
+build/
+*/build/
+captures/
+.externalNativeBuild/
+.cxx/
+.local/
+out/
+
+# ---- Android Studio / IntelliJ ----
+.idea/
+*.iml
+*.hprof
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# ---- Kotlin / JVM ----
+*.class
+*.log
+hs_err_pid*
+
+# ---- Python (overlay scripts are compiled during checks) ----
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# ---- OS noise ----
+.DS_Store
+Thumbs.db

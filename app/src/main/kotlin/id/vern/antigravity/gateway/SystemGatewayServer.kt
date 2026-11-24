@@ -13,8 +13,6 @@ import android.util.Log
 import android.widget.Toast
 import id.vern.antigravity.service.WakeLockHolder
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -27,6 +25,16 @@ class SystemGatewayServer(
 ) {
     companion object {
         private const val TAG = "SystemGateway"
+
+        /**
+         * Hard ceiling for a request body. Without this, a single request with a
+         * huge `Content-Length` header could allocate arbitrarily large buffers
+         * and OOM the whole process.
+         */
+        private const val MAX_BODY_BYTES = 64 * 1024
+
+        /** Request head ceiling, so a client cannot stream headers forever. */
+        private const val MAX_HEAD_BYTES = 8 * 1024
     }
 
     private val executor = Executors.newFixedThreadPool(3)
@@ -72,48 +80,99 @@ class SystemGatewayServer(
     private fun handleClient(socket: Socket) {
         socket.use { client ->
             try {
-                val reader = BufferedReader(InputStreamReader(client.getInputStream(), Charsets.UTF_8))
-                val firstLine = reader.readLine() ?: return
-                val parts = firstLine.split(" ")
+                // Parse the request head at the BYTE level. Using a
+                // BufferedReader(InputStreamReader(UTF_8)) hid body bytes inside
+                // the reader's internal buffer, so the body could not be read
+                // back from the raw stream afterwards.
+                val raw = client.getInputStream()
+                val head = readRequestHead(raw, MAX_HEAD_BYTES) ?: return
+                val lines = head.split("\r\n", "\n")
+                val requestLine = lines.firstOrNull().orEmpty()
+                val parts = requestLine.split(" ")
                 val method = parts.getOrNull(0) ?: "GET"
                 val rawPath = parts.getOrNull(1) ?: "/"
 
                 var contentLength = 0
-                var headerLine = reader.readLine()
-                while (!headerLine.isNullOrEmpty()) {
+                for (i in 1 until lines.size) {
+                    val headerLine = lines[i]
+                    if (headerLine.isEmpty()) break
                     if (headerLine.startsWith("Content-Length:", ignoreCase = true)) {
                         contentLength = headerLine.substringAfter(":").trim().toIntOrNull() ?: 0
                     }
-                    headerLine = reader.readLine()
                 }
 
+                // Reject absurd lengths instead of trying to allocate them.
+                if (contentLength < 0 || contentLength > MAX_BODY_BYTES) {
+                    Log.w(TAG, "Rejecting gateway request with Content-Length=$contentLength")
+                    writeJson(client, "{\"ok\":false,\"error\":\"body_too_large\"}", "413 Payload Too Large")
+                    return
+                }
+
+                // Content-Length is a byte count; read exactly that many bytes.
                 val body = if (contentLength > 0) {
-                    val buffer = CharArray(contentLength)
+                    val bytes = ByteArray(contentLength)
                     var read = 0
                     while (read < contentLength) {
-                        val n = reader.read(buffer, read, contentLength - read)
+                        val n = raw.read(bytes, read, contentLength - read)
                         if (n == -1) break
                         read += n
                     }
-                    String(buffer, 0, read)
+                    String(bytes, 0, read, Charsets.UTF_8)
                 } else ""
 
+                if (method.equals("GET", ignoreCase = true) && rawPath.trimEnd('/').endsWith("/clipboard")) {
+                    // Reading the clipboard from an unauthenticated localhost
+                    // endpoint leaks whatever the user last copied (passwords,
+                    // 2FA codes). Require an explicit POST to opt in.
+                    writeJson(
+                        client,
+                        JSONObject().put("ok", false).put("error", "clipboard_read_requires_post").toString(),
+                        "405 Method Not Allowed"
+                    )
+                    return
+                }
+
                 val responseJson = dispatch(rawPath, body)
-                val responseBytes = responseJson.toString().toByteArray(Charsets.UTF_8)
-
-                val out = client.getOutputStream()
-                val header = "HTTP/1.1 200 OK\r\n" +
-                        "Content-Type: application/json; charset=utf-8\r\n" +
-                        "Content-Length: ${responseBytes.size}\r\n" +
-                        "Connection: close\r\n" +
-                        "\r\n"
-
-                out.write(header.toByteArray(Charsets.UTF_8))
-                out.write(responseBytes)
-                out.flush()
+                writeJson(client, responseJson.toString(), "200 OK")
             } catch (e: Exception) {
                 Log.w(TAG, "Gateway client handle error: ${e.message}")
             }
+        }
+    }
+
+    /** Reads bytes until the end of the HTTP request head (CRLFCRLF). */
+    private fun readRequestHead(input: java.io.InputStream, limit: Int): String? {
+        val buffer = java.io.ByteArrayOutputStream()
+        var prev = -1
+        while (buffer.size() < limit) {
+            val b = input.read()
+            if (b == -1) break
+            buffer.write(b)
+            // Terminate on CRLFCRLF or a bare LFLF.
+            if (b == '\n'.code && (prev == '\n'.code || prev == '\r'.code)) {
+                val seen = buffer.toString(Charsets.UTF_8.name())
+                if (seen.endsWith("\r\n\r\n") || seen.endsWith("\n\n")) break
+            }
+            prev = b
+        }
+        if (buffer.size() >= limit) return null
+        return buffer.toString(Charsets.UTF_8.name())
+    }
+
+    private fun writeJson(client: Socket, json: String, status: String) {
+        try {
+            val responseBytes = json.toByteArray(Charsets.UTF_8)
+            val out = client.getOutputStream()
+            val header = "HTTP/1.1 $status\r\n" +
+                    "Content-Type: application/json; charset=utf-8\r\n" +
+                    "Content-Length: ${responseBytes.size}\r\n" +
+                    "Connection: close\r\n" +
+                    "\r\n"
+            out.write(header.toByteArray(Charsets.UTF_8))
+            out.write(responseBytes)
+            out.flush()
+        } catch (e: Exception) {
+            Log.w(TAG, "Gateway response write error: ${e.message}")
         }
     }
 

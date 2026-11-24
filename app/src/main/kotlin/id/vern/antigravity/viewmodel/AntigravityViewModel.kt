@@ -96,6 +96,8 @@ data class CoreEngineUpdateState(
     val latestVersion: String? = null,
     val isUpdateAvailable: Boolean = false,
     val downloadUrl: String? = null,
+    /** SHA-512 from the release manifest; enforced before the binary is executed. */
+    val sha512: String? = null,
     val lastCheckedTime: Long = 0L,
     val error: String? = null
 )

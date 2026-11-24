@@ -73,6 +73,7 @@ object CoreUpdateDelegate {
                 latestVersion = updateInfo.version,
                 isUpdateAvailable = updateInfo.isUpdateAvailable,
                 downloadUrl = updateInfo.url,
+                sha512 = updateInfo.sha512,
                 lastCheckedTime = System.currentTimeMillis(),
                 error = null
             )
@@ -98,6 +99,7 @@ object CoreUpdateDelegate {
         val updateInfo = CoreUpdateInfo(
             version = latestVer,
             url = url,
+            sha512 = state.sha512 ?: "",
             currentVersion = state.currentVersion,
             isUpdateAvailable = true
         )

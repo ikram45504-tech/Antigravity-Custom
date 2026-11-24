@@ -163,6 +163,25 @@ object CoreUpdateManager {
                 throw IllegalStateException("Failed downloading core engine after $maxAttempts attempts: ${lastDownloadError?.message}", lastDownloadError)
             }
 
+            // The manifest advertises sha512; actually enforce it. Without this
+            // check the only gate before executing the downloaded binary was an
+            // ELF magic-byte test, so a compromised or MITM'd download would be
+            // executed inside the app sandbox.
+            if (updateInfo.sha512.isNotBlank()) {
+                onProgress(0.66f, "Verifying download checksum...")
+                val actual = calculateFileSha512(tarGzFile)
+                if (!actual.equals(updateInfo.sha512.trim(), ignoreCase = true)) {
+                    try { tarGzFile.delete() } catch (e: Exception) {}
+                    Log.e(TAG, "Core engine checksum mismatch: expected ${updateInfo.sha512}, got $actual")
+                    return Result.failure(
+                        Exception("Downloaded core engine failed SHA-512 verification (expected ${updateInfo.sha512}, got $actual)")
+                    )
+                }
+                Log.i(TAG, "Core engine download verified against manifest SHA-512")
+            } else {
+                Log.w(TAG, "Manifest did not provide a sha512; skipping checksum verification")
+            }
+
             onProgress(0.70f, "Extracting binary package...")
             var extracted = extractTarGzMember(tarGzFile, "antigravity", stagingFile)
             if (!extracted) {
@@ -265,6 +284,20 @@ object CoreUpdateManager {
             }
             return Result.failure(e)
         }
+    }
+
+    /** Streams the file through SHA-512 without loading it into memory. */
+    private fun calculateFileSha512(file: File): String {
+        if (!file.isFile || !file.canRead()) return ""
+        val digest = java.security.MessageDigest.getInstance("SHA-512")
+        BufferedInputStream(FileInputStream(file), 65536).use { input ->
+            val buffer = ByteArray(65536)
+            var read: Int
+            while (input.read(buffer).also { read = it } != -1) {
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun extractTarGzMember(tarGzFile: File, memberName: String, destFile: File): Boolean {

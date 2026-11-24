@@ -1,6 +1,3 @@
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import java.util.Properties
 
 plugins {
@@ -17,13 +14,55 @@ kotlin {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Release signing
+//
+// Resolved once, at configuration time, so both the `signingConfigs` block and
+// the assemble guard below agree on whether a real release key is available.
+// There is deliberately no hardcoded password fallback: a guessable release key
+// lets anyone produce an APK that Android accepts as an upgrade of this app.
+// ---------------------------------------------------------------------------
+val localProperties = Properties().apply {
+    val propFile = rootProject.file("local.properties")
+    if (propFile.exists()) {
+        propFile.inputStream().use { load(it) }
+    }
+}
+
+fun envOrNull(name: String): String? = System.getenv(name)?.takeIf { it.isNotBlank() }
+
+val resolvedKeystore = listOf(
+    file("release.keystore"),
+    rootProject.file("app/release.keystore"),
+    file("KuatoDev.jks"),
+    rootProject.file("app/KuatoDev.jks")
+).firstOrNull { it.exists() }
+
+val releaseStorePassword: String? = localProperties.getProperty("signing.storePassword")
+    ?: (project.findProperty("storePassword") as String?)
+    ?: envOrNull("SIGNING_STORE_PASSWORD")
+val releaseKeyAlias: String? = localProperties.getProperty("signing.keyAlias")
+    ?: (project.findProperty("alias") as String?)
+    ?: envOrNull("SIGNING_KEY_ALIAS")
+val releaseKeyPassword: String? = localProperties.getProperty("signing.keyPassword")
+    ?: (project.findProperty("keyPassword") as String?)
+    ?: envOrNull("SIGNING_KEY_PASSWORD")
+
+val hasReleaseSigning: Boolean = resolvedKeystore != null &&
+    !releaseStorePassword.isNullOrBlank() &&
+    !releaseKeyAlias.isNullOrBlank() &&
+    !releaseKeyPassword.isNullOrBlank()
+
 android {
     namespace = "id.vern.antigravity"
     compileSdk = 36
 
     defaultConfig {
         applicationId = "id.ikram.antigravity"
-        minSdk = 26
+        // The bundled Linux userspace needs the glibc bootstrap, exec of
+        // extracted binaries, and MANAGE_EXTERNAL_STORAGE behaviour; none of
+        // that is viable below Android 11. Keep this in sync with README.md.
+        minSdk = 30
         targetSdk = 28
         versionCode = 7
         versionName = "1.0.6"
@@ -50,39 +89,13 @@ android {
         noCompress += listOf("zip", "gz", "tar")
     }
 
-    val localProperties = Properties().apply {
-        val propFile = rootProject.file("local.properties")
-        if (propFile.exists()) {
-            propFile.inputStream().use { load(it) }
-        }
-    }
-
-    val keystoreCandidates = listOf(
-        file("release.keystore"),
-        rootProject.file("app/release.keystore"),
-        file("KuatoDev.jks"),
-        rootProject.file("app/KuatoDev.jks")
-    )
-    val resolvedKeystore = keystoreCandidates.firstOrNull { it.exists() }
-
-    fun envOrNull(name: String): String? = System.getenv(name)?.takeIf { it.isNotBlank() }
-
     signingConfigs {
         create("release") {
-            if (resolvedKeystore != null && resolvedKeystore.exists()) {
+            if (hasReleaseSigning) {
                 storeFile = resolvedKeystore
-                storePassword = localProperties.getProperty("signing.storePassword")
-                    ?: (project.findProperty("storePassword") as String?)
-                    ?: envOrNull("SIGNING_STORE_PASSWORD")
-                    ?: "antigravity123"
-                keyAlias = localProperties.getProperty("signing.keyAlias")
-                    ?: (project.findProperty("alias") as String?)
-                    ?: envOrNull("SIGNING_KEY_ALIAS")
-                    ?: "antigravity"
-                keyPassword = localProperties.getProperty("signing.keyPassword")
-                    ?: (project.findProperty("keyPassword") as String?)
-                    ?: envOrNull("SIGNING_KEY_PASSWORD")
-                    ?: "antigravity123"
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
                 enableV1Signing = true
                 enableV2Signing = true
                 enableV3Signing = true
@@ -94,11 +107,18 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            val releaseSigning = signingConfigs.getByName("release")
-            signingConfig = if (releaseSigning.storeFile != null && releaseSigning.storeFile!!.exists()) {
-                releaseSigning
+            // Fail closed: never silently emit a debug-signed "release" APK,
+            // because it cannot be installed as an upgrade over a real release.
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
             } else {
-                signingConfigs.getByName("debug")
+                logger.warn(
+                    "WARNING: no release signing config found (keystore + " +
+                        "signing.storePassword/signing.keyAlias/signing.keyPassword " +
+                        "or SIGNING_* env vars). `assembleRelease` will refuse to build " +
+                        "a distributable APK; use `assembleDebug` for local testing."
+                )
+                null
             }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
@@ -123,6 +143,22 @@ android {
         }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+}
+
+// Guard against the historical failure mode where a release APK was produced
+// without any signing configuration and silently shipped debug-signed.
+tasks.matching { it.name == "assembleRelease" || it.name == "bundleRelease" }.configureEach {
+    doFirst {
+        if (!hasReleaseSigning) {
+            throw GradleException(
+                "Refusing to build ${project.path}:${this.name} without release signing.\n" +
+                    "Provide app/release.keystore (or app/KuatoDev.jks) plus credentials via " +
+                    "local.properties (signing.storePassword, signing.keyAlias, " +
+                    "signing.keyPassword) or the SIGNING_STORE_PASSWORD / " +
+                    "SIGNING_KEY_ALIAS / SIGNING_KEY_PASSWORD environment variables."
+            )
         }
     }
 }

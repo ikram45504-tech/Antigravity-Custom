@@ -60,7 +60,11 @@ class CoreServerService : Service() {
         super.onCreate()
         Log.i(TAG, "Creating CoreServerService...")
         ForegroundNotification.start(this, getString(R.string.notification_engine_active))
-        wakeLockHolder.acquire(this, 15_000L)
+        // Hold the lock for the lifetime of the service. A short timeout (this
+        // used to be 15_000L = 15 seconds) meant the CPU suspended almost
+        // immediately and every scheduled daemon task became best-effort, which
+        // contradicted what the cron/watch triggers in agy-daemon advertise.
+        wakeLockHolder.acquire(this)
 
         gatewayServer = SystemGatewayServer(this, 45161, wakeLockHolder)
         gatewayServer?.start()
