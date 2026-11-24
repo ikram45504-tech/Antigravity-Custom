@@ -126,8 +126,8 @@ def run_task_worker(task):
     success = False
     output = ""
     env = os.environ.copy()
-    prefix = env.get("PREFIX", "/data/user/0/id.vern.antigravity/files/usr")
-    home = env.get("HOME", "/data/user/0/id.vern.antigravity/files/home")
+    prefix = env.get("PREFIX", "/data/user/0/id.ikram.antigravity/files/usr")
+    home = env.get("HOME", "/data/user/0/id.ikram.antigravity/files/home")
     env["PATH"] = f"{prefix}/bin:{env.get('PATH', '')}"
     env["HOME"] = home
     if convo_id:
