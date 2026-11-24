@@ -65,21 +65,23 @@ android {
     )
     val resolvedKeystore = keystoreCandidates.firstOrNull { it.exists() }
 
+    fun envOrNull(name: String): String? = System.getenv(name)?.takeIf { it.isNotBlank() }
+
     signingConfigs {
         create("release") {
             if (resolvedKeystore != null && resolvedKeystore.exists()) {
                 storeFile = resolvedKeystore
                 storePassword = localProperties.getProperty("signing.storePassword")
                     ?: (project.findProperty("storePassword") as String?)
-                    ?: System.getenv("SIGNING_STORE_PASSWORD")
+                    ?: envOrNull("SIGNING_STORE_PASSWORD")
                     ?: "antigravity123"
                 keyAlias = localProperties.getProperty("signing.keyAlias")
                     ?: (project.findProperty("alias") as String?)
-                    ?: System.getenv("SIGNING_KEY_ALIAS")
+                    ?: envOrNull("SIGNING_KEY_ALIAS")
                     ?: "antigravity"
                 keyPassword = localProperties.getProperty("signing.keyPassword")
                     ?: (project.findProperty("keyPassword") as String?)
-                    ?: System.getenv("SIGNING_KEY_PASSWORD")
+                    ?: envOrNull("SIGNING_KEY_PASSWORD")
                     ?: "antigravity123"
                 enableV1Signing = true
                 enableV2Signing = true
