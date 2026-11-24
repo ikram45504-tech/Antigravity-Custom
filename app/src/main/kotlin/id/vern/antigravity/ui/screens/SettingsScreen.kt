@@ -619,7 +619,7 @@ fun GitHubSettingsPage(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Git credentials are synced to ~/.git-credentials for all repositories.",
+                            text = "Git credentials are synced to ~/.gitconfig for all repositories.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                         )
