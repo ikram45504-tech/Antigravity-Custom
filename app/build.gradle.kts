@@ -25,8 +25,8 @@ android {
         applicationId = "id.ikram.antigravity"
         minSdk = 26
         targetSdk = 28
-        versionCode = 6
-        versionName = "1.0.5"
+        versionCode = 7
+        versionName = "1.0.6"
 
         vectorDrawables {
             useSupportLibrary = true
@@ -57,27 +57,30 @@ android {
         }
     }
 
-    val keystorePath = localProperties.getProperty("signing.storeFile")
-        ?: (project.findProperty("storeFile") as String?)
-        ?: "KuatoDev.jks"
-    val resolvedKeystore = file(keystorePath)
+    val keystoreCandidates = listOf(
+        file("release.keystore"),
+        rootProject.file("app/release.keystore"),
+        file("KuatoDev.jks"),
+        rootProject.file("app/KuatoDev.jks")
+    )
+    val resolvedKeystore = keystoreCandidates.firstOrNull { it.exists() }
 
     signingConfigs {
         create("release") {
-            if (resolvedKeystore.exists()) {
+            if (resolvedKeystore != null && resolvedKeystore.exists()) {
                 storeFile = resolvedKeystore
                 storePassword = localProperties.getProperty("signing.storePassword")
                     ?: (project.findProperty("storePassword") as String?)
                     ?: System.getenv("SIGNING_STORE_PASSWORD")
-                    ?: ""
+                    ?: "antigravity123"
                 keyAlias = localProperties.getProperty("signing.keyAlias")
                     ?: (project.findProperty("alias") as String?)
                     ?: System.getenv("SIGNING_KEY_ALIAS")
-                    ?: ""
+                    ?: "antigravity"
                 keyPassword = localProperties.getProperty("signing.keyPassword")
                     ?: (project.findProperty("keyPassword") as String?)
                     ?: System.getenv("SIGNING_KEY_PASSWORD")
-                    ?: ""
+                    ?: "antigravity123"
                 enableV1Signing = true
                 enableV2Signing = true
                 enableV3Signing = true
