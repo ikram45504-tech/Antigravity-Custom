@@ -288,6 +288,20 @@ object BootstrapInstaller {
         }
     }
 
+    /**
+     * True when [candidate] resolves inside [canonicalBase] (inclusive).
+     * Compares the canonical directory plus a separator so that a sibling like
+     * `/files/usr2` cannot satisfy a check against `/files/usr`.
+     */
+    private fun isWithinDirectory(candidate: File, canonicalBase: String): Boolean {
+        val canonical = try {
+            candidate.canonicalPath
+        } catch (e: Exception) {
+            return false
+        }
+        return canonical == canonicalBase || canonical.startsWith(canonicalBase + File.separator)
+    }
+
     private fun extractZipStream(stream: InputStream, targetDir: File) {
         val targetCanonical = targetDir.canonicalPath
         val buffer = ByteArray(65536)
@@ -297,8 +311,11 @@ object BootstrapInstaller {
             while (entry != null) {
                 val entryName = entry.name
                 val destFile = File(targetDir, entryName)
-                val destCanonical = destFile.canonicalPath
-                if (!destCanonical.startsWith(targetCanonical)) {
+                // Zip Slip guard. A bare `startsWith(targetCanonical)` also
+                // matches sibling prefixes (".../usr" matches ".../usr2"), so
+                // compare against the canonical directory plus a separator.
+                if (!isWithinDirectory(destFile, targetCanonical)) {
+                    Log.w(TAG, "Skipping zip entry escaping target dir: $entryName")
                     entry = zis.nextEntry
                     continue
                 }
@@ -363,7 +380,31 @@ object BootstrapInstaller {
                         relPath = relPath.substring(2)
                     }
 
+                    val prefixCanonical = try {
+                        prefix.canonicalPath
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Cannot canonicalise prefix; skipping symlink restore")
+                        return
+                    }
+
                     val linkFile = File(prefix, relPath)
+                    // The link itself must live inside the prefix...
+                    if (!isWithinDirectory(linkFile, prefixCanonical)) {
+                        Log.w(TAG, "Skipping symlink outside prefix: $relPath")
+                        continue
+                    }
+                    // ...and an absolute target must not escape it either.
+                    // Relative targets are resolved from the link's parent.
+                    val resolvedTarget = if (target.startsWith("/")) {
+                        File(target)
+                    } else {
+                        File(linkFile.parentFile ?: prefix, target)
+                    }
+                    if (!isWithinDirectory(resolvedTarget, prefixCanonical)) {
+                        Log.w(TAG, "Skipping symlink with escaping target: $relPath -> $target")
+                        continue
+                    }
+
                     linkFile.parentFile?.mkdirs()
 
                     try { Os.remove(linkFile.absolutePath) } catch (e: Exception) {}
@@ -394,26 +435,40 @@ object BootstrapInstaller {
                     ZipFile(apkFile).use { apkZip ->
                         val entries = apkZip.entries()
                         val buffer = ByteArray(32768)
+                        val prefixCanonical = prefix.canonicalPath
                         while (entries.hasMoreElements()) {
                             val entry = entries.nextElement()
                             val name = entry.name
+                            // Every destination is validated against the prefix:
+                            // a crafted or corrupted entry such as
+                            // "assets/overlay/../../<file>" must not write outside it.
                             if (name.startsWith("assets/overlay/")) {
                                 val relPath = name.removePrefix("assets/overlay/")
                                 if (relPath.isNotEmpty()) {
                                     val dest = File(prefix, relPath)
-                                    extractApkEntryToFile(apkZip, entry, dest, buffer)
+                                    if (isWithinDirectory(dest, prefixCanonical)) {
+                                        extractApkEntryToFile(apkZip, entry, dest, buffer)
+                                    } else {
+                                        Log.w(TAG, "Skipping overlay entry outside prefix: $name")
+                                    }
                                 }
                             } else if (name.startsWith("assets/pkg/")) {
                                 val relPath = name.removePrefix("assets/pkg/")
                                 if (relPath.isNotEmpty()) {
                                     val dest = File(File(prefix, "pkg"), relPath)
+                                    if (!isWithinDirectory(dest, prefixCanonical)) {
+                                        Log.w(TAG, "Skipping pkg entry outside prefix: $name")
+                                        continue
+                                    }
                                     extractApkEntryToFile(apkZip, entry, dest, buffer)
                                     if (relPath == "pkg") {
                                         val binPkg = File(prefix, "bin/pkg")
                                         extractApkEntryToFile(apkZip, entry, binPkg, buffer)
                                     } else if (relPath.startsWith("lib/")) {
                                         val binLib = File(prefix, "bin/$relPath")
-                                        extractApkEntryToFile(apkZip, entry, binLib, buffer)
+                                        if (isWithinDirectory(binLib, prefixCanonical)) {
+                                            extractApkEntryToFile(apkZip, entry, binLib, buffer)
+                                        }
                                     }
                                 }
                             }

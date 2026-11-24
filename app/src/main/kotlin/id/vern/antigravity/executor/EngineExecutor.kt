@@ -13,6 +13,20 @@ import java.io.InputStreamReader
 
 object EngineExecutor {
 
+    /**
+     * Quotes a value for safe interpolation into a `bash -c` command string.
+     *
+     * Paths reach this layer from user-selected directories, `git status`
+     * output, and remote catalogue entries, any of which may contain characters
+     * that would otherwise terminate the surrounding single-quoted string and
+     * execute arbitrary shell. Wraps the value in single quotes and escapes
+     * embedded quotes as `'\''`, which is the only escape a single-quoted
+     * bash string recognises.
+     */
+    fun shellQuote(value: String): String {
+        return "'" + value.replace("'", "'\\''") + "'"
+    }
+
     @Volatile
     private var isEnvironmentHealed = false
 

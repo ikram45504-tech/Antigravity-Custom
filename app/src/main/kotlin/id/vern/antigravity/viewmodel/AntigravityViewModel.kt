@@ -96,6 +96,8 @@ data class CoreEngineUpdateState(
     val latestVersion: String? = null,
     val isUpdateAvailable: Boolean = false,
     val downloadUrl: String? = null,
+    /** SHA-512 from the release manifest; enforced before the binary is executed. */
+    val sha512: String? = null,
     val lastCheckedTime: Long = 0L,
     val error: String? = null
 )
@@ -1686,8 +1688,9 @@ class AntigravityViewModel : ViewModel() {
             val root = File(workspacePath.value)
             if (root.exists() && File(root, ".git").exists()) {
                 EngineExecutor.executeCommand(
-                    context,
-                    "cd '${root.absolutePath}' && (git restore --staged . 2>/dev/null || true) && (git restore . 2>/dev/null || git checkout -- . 2>/dev/null || true)"
+                    context = context,
+                    command = "(git restore --staged . 2>/dev/null || true) && (git restore . 2>/dev/null || git checkout -- . 2>/dev/null || true)",
+                    workingDir = root
                 ) { _, _ -> }
             }
             withContext(Dispatchers.Main) {
@@ -2466,7 +2469,11 @@ class AntigravityViewModel : ViewModel() {
 
         try {
             val statusMap = mutableMapOf<String, String>()
-            EngineExecutor.executeCommand(context, "cd '${root.absolutePath}' && git status --porcelain 2>/dev/null") { line, exitCode ->
+            EngineExecutor.executeCommand(
+                context = context,
+                command = "git status --porcelain 2>/dev/null",
+                workingDir = root
+            ) { line, exitCode ->
                 val trimmed = line.trim()
                 if (trimmed.length >= 3) {
                     val st = trimmed.substring(0, 2).trim()
@@ -2481,7 +2488,11 @@ class AntigravityViewModel : ViewModel() {
             }
 
             val numstats = mutableListOf<Triple<String, Int, Int>>()
-            EngineExecutor.executeCommand(context, "cd '${root.absolutePath}' && git diff --numstat 2>/dev/null") { line, exitCode ->
+            EngineExecutor.executeCommand(
+                context = context,
+                command = "git diff --numstat 2>/dev/null",
+                workingDir = root
+            ) { line, exitCode ->
                 val parts = line.trim().split(Regex("""\s+"""))
                 if (parts.size >= 3) {
                     val add = parts[0].toIntOrNull() ?: 0
@@ -2494,7 +2505,11 @@ class AntigravityViewModel : ViewModel() {
             val diffsMap = mutableMapOf<String, String>()
             if (numstats.isNotEmpty() && numstats.size <= 30) {
                 val combinedDiffSb = StringBuilder()
-                EngineExecutor.executeCommand(context, "cd '${root.absolutePath}' && git diff -U3 2>/dev/null | head -n 1200") { line, isErr ->
+                EngineExecutor.executeCommand(
+                    context = context,
+                    command = "git diff -U3 2>/dev/null | head -n 1200",
+                    workingDir = root
+                ) { line, isErr ->
                     combinedDiffSb.append(line).append("\n")
                 }
                 val fullDiff = combinedDiffSb.toString()

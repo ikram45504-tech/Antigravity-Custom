@@ -1,0 +1,140 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    name: Kotlin + Python unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      # ubuntu-latest preinstalls the Android SDK; accept licences so that
+      # dependency resolution and the compileSdk/platform download can proceed.
+      - name: Prepare Android SDK
+        run: |
+          set -euo pipefail
+          echo "ANDROID_HOME=${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          ls "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/platforms" || true
+          yes | "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+
+      - name: Grant Execute Permission for Gradlew
+        run: chmod +x gradlew
+
+      # Pure JVM tests only: no device or emulator required.
+      # Gradle output is tee'd so that compile errors (which are otherwise buried
+      # in the raw job log) are re-emitted as check-run annotations, where they
+      # show up directly on the pull request.
+      - name: Run JVM unit tests
+        run: |
+          set -o pipefail
+          ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee gradle-test.log
+        continue-on-error: true
+        id: unit_tests
+
+      - name: Surface compile/test failures as annotations
+        if: steps.unit_tests.outcome != 'success'
+        # Best-effort reporting only: never let this step hide the real failure.
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          echo "### Unit test / compile failures" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          # Kotlin compiler diagnostics look like:  e: file:///path/File.kt:12:5 message
+          grep -E '^e: ' gradle-test.log | head -40 > kotlin-errors.txt || true
+          while IFS= read -r line; do
+            raw=$(echo "$line" | sed -E 's#^e: file://([^:]+):([0-9]+).*#\1#')
+            num=$(echo "$line" | sed -E 's#^e: file://([^:]+):([0-9]+).*#\2#')
+            msg=$(echo "$line" | sed -E 's#^e: file://[^ ]+ (.*)#\1#')
+            # Annotations need a repo-relative path; strip the runner workspace prefix.
+            # /home/runner/work/<repo>/<repo>/app/... -> strip through the
+            # repo directory (the first path segment repeated twice).
+            file="${raw#"$GITHUB_WORKSPACE"/}"
+            if [ -n "$raw" ] && [ -n "$num" ] && [ "$file" != "$raw" ]; then
+              echo "::error file=${file},line=${num}::${msg}"
+            else
+              echo "::error::${line}"
+            fi
+          done < kotlin-errors.txt
+
+          # JUnit failures and Gradle's own summary.
+          grep -E 'FAILED|What went wrong|Caused by|There were failing tests' -A 3 gradle-test.log | head -60 >> "$GITHUB_STEP_SUMMARY" || true
+          grep -E '^e: ' gradle-test.log | head -40 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          exit 1
+
+      # Guard against a hollow green build: `testDebugUnitTest` also succeeds when
+      # it discovers zero tests, which would hide a mis-registered source set.
+      - name: Verify tests actually ran
+        if: steps.unit_tests.outcome == 'success'
+        run: |
+          set -euo pipefail
+          count=$(find app/build/test-results -name 'TEST-*.xml' -exec             python3 -c 'import sys,xml.etree.ElementTree as E;print(sum(int(E.parse(f).getroot().get("tests",0)) for f in sys.argv[1:]))' {} + 2>/dev/null || echo 0)
+          echo "Collected ${count} JVM unit tests"
+          if [ "${count}" -lt 1 ]; then
+            echo "::error::No JVM unit tests were executed - check the test source dir"
+            exit 1
+          fi
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: |
+            app/build/reports/tests/**
+            app/build/test-results/**
+          retention-days: 7
+          if-no-files-found: ignore
+
+  python-tests:
+    name: Overlay script tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compile-check overlay scripts
+        run: |
+          set -euo pipefail
+          find app/src/main/assets -name '*.py' -print0 | xargs -0 python3 -m py_compile
+
+      - name: Syntax-check overlay shell scripts
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' script; do
+            # agy-daemon and friends are python files with a shell shebang shim.
+            if head -n 2 "$script" | grep -q 'python3'; then
+              continue
+            fi
+            bash -n "$script"
+          done < <(find app/src/main/assets/overlay/bin app/src/main/assets/pkg -type f ! -name "*.awk" -print0)
+
+      - name: Run daemon scheduler tests
+        run: python3 -m unittest discover -s app/src/test/python -v

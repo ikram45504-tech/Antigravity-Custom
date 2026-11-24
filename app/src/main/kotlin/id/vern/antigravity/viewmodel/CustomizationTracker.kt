@@ -13,11 +13,62 @@ object CustomizationTracker {
     private const val PREFS_NAME = "antigravity_prefs"
     private const val KEY_CUSTOMIZATION_TRACKING = "ag_customization_tracking"
 
+    /**
+     * Characters that would let a repo URL or sub-path escape the single-quoted
+     * context it is interpolated into by the shell commands in
+     * CustomizationInstallerDelegate. Legitimate git URLs and repo sub-paths
+     * never contain these, so rejecting them is safe and keeps every downstream
+     * `'...'` interpolation honest.
+     */
+    private val UNSAFE_SHELL_CHARS: Set<Char> = setOf(
+        '\'', '"', '`', '$', '\\', ';', '&', '|', '<', '>',
+        '(', ')', '{', '}', '[', ']', '*', '?', '!', '~', '#', '^'
+    )
+
+    private fun isShellSafe(value: String): Boolean =
+        value.isNotBlank() &&
+            !value.contains(' ') &&
+            value.none { it.isISOControl() || it in UNSAFE_SHELL_CHARS }
+
+    /**
+     * Returns [repoUrl] unchanged when it is safe to interpolate into a
+     * single-quoted shell argument, or an empty string otherwise. Used for
+     * values read back from persisted tracking records, which were not
+     * necessarily written by the current validator.
+     */
+    fun sanitizeRepoUrl(repoUrl: String?): String {
+        if (repoUrl.isNullOrBlank()) return ""
+        val trimmed = repoUrl.trim()
+        return if (isShellSafe(trimmed)) trimmed else {
+            Log.w("CustomizationTracker", "Dropping unsafe tracked repo URL")
+            ""
+        }
+    }
+
+    /**
+     * Validates a repo sub-path that will be interpolated into a shell command
+     * (`cp -r '$clone/$sub'`). Returns null when the value is unsafe, so the
+     * caller degrades to "copy the whole clone root".
+     */
+    fun sanitizeSubPath(subPath: String?): String? {
+        if (subPath.isNullOrBlank()) return null
+        return if (isShellSafe(subPath.trim().trim('/'))) subPath.trim().trim('/') else {
+            Log.w("CustomizationTracker", "Dropping unsafe repo sub-path")
+            null
+        }
+    }
+
     fun normalizeGitRepoUrl(rawUrl: String): Pair<String, String?> {
         var clean = rawUrl.trim()
         if (clean.isBlank()) return Pair("", null)
         if (!clean.startsWith("http://") && !clean.startsWith("https://") && !clean.startsWith("git@")) {
             clean = "https://github.com/" + clean.trimStart('/')
+        }
+        // Reject shell metacharacters before the value is ever interpolated
+        // into a `git clone '...'` command string.
+        if (!isShellSafe(clean)) {
+            Log.w("CustomizationTracker", "Rejecting repo URL with unsafe characters")
+            return Pair("", null)
         }
         val treeRegex = Regex("""^(https?://[^/]+/[^/]+/[^/]+)/(?:tree|blob)/([^/]+)(?:/(.*))?$""")
         val match = treeRegex.find(clean)
@@ -30,6 +81,13 @@ object CustomizationTracker {
             if (subpath != null && subpath.lowercase().endsWith(".md")) {
                 val parent = subpath.substringBeforeLast('/', "")
                 subpath = parent.ifEmpty { null }
+            }
+            // The sub-path is interpolated into `cp -r '$tmp/$sub'`, so apply the
+            // same rejection here. Drop it (rather than the whole URL) so the
+            // caller falls back to copying the clone root.
+            if (subpath != null && !isShellSafe(subpath)) {
+                Log.w("CustomizationTracker", "Dropping repo sub-path with unsafe characters")
+                subpath = null
             }
             return Pair(baseRepo, subpath)
         }

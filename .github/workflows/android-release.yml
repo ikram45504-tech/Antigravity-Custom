@@ -19,6 +19,15 @@ jobs:
     name: Compile Release APK
     runs-on: ubuntu-latest
 
+    # Declared at job level so that every step's `if:` can see it. A `step.env`
+    # value is NOT visible to that same step's `if:` expression, which is why
+    # the keystore install step used to be silently skipped on every run.
+    env:
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+      SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+      SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -34,17 +43,28 @@ jobs:
         run: chmod +x gradlew
 
       - name: Setup Signing Keystore
-        if: ${{ env.KEYSTORE_BASE64 != '' }}
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        if: env.KEYSTORE_BASE64 != ''
         run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > app/KuatoDev.jks
+          set -euo pipefail
+          echo "$KEYSTORE_BASE64" | base64 -d > app/release.keystore
+          echo "Keystore written to app/release.keystore"
+
+      - name: Verify Signing Configuration
+        run: |
+          set -euo pipefail
+          missing=""
+          [ -f app/release.keystore ] || missing="$missing keystore"
+          [ -n "${SIGNING_STORE_PASSWORD:-}" ] || missing="$missing SIGNING_STORE_PASSWORD"
+          [ -n "${SIGNING_KEY_ALIAS:-}" ] || missing="$missing SIGNING_KEY_ALIAS"
+          [ -n "${SIGNING_KEY_PASSWORD:-}" ] || missing="$missing SIGNING_KEY_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing release signing material:$missing"
+            echo "Add the KEYSTORE_BASE64 / SIGNING_* repository secrets before building a release."
+            exit 1
+          fi
+          echo "All release signing material present."
 
       - name: Compile Release APK
-        env:
-          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
-          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
-          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
         run: ./gradlew assembleRelease --stacktrace
 
       - name: Upload Release APK Artifact

@@ -4,6 +4,7 @@ import android.content.Context
 import android.system.Os
 import android.util.Log
 import id.vern.antigravity.util.NetworkDownloader
+import id.vern.antigravity.util.VersionComparator
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
@@ -87,19 +88,13 @@ object CoreUpdateManager {
         )
     }
 
-    fun isVersionNewer(remote: String, current: String): Boolean {
-        if (remote == current) return false
-        val rParts = remote.split(".").mapNotNull { it.toIntOrNull() }
-        val cParts = current.split(".").mapNotNull { it.toIntOrNull() }
-        val maxLen = maxOf(rParts.size, cParts.size)
-        for (i in 0 until maxLen) {
-            val r = rParts.getOrElse(i) { 0 }
-            val c = cParts.getOrElse(i) { 0 }
-            if (r > c) return true
-            if (r < c) return false
-        }
-        return false
-    }
+    /**
+     * Retained for callers, but now backed by the shared [VersionComparator] so
+     * the app-update and core-engine-update paths can never disagree about
+     * which version is newer.
+     */
+    fun isVersionNewer(remote: String, current: String): Boolean =
+        VersionComparator.isNewer(remote, current)
 
     fun downloadAndApply(
         context: Context,
@@ -161,6 +156,25 @@ object CoreUpdateManager {
 
             if (!downloadSucceeded) {
                 throw IllegalStateException("Failed downloading core engine after $maxAttempts attempts: ${lastDownloadError?.message}", lastDownloadError)
+            }
+
+            // The manifest advertises sha512; actually enforce it. Without this
+            // check the only gate before executing the downloaded binary was an
+            // ELF magic-byte test, so a compromised or MITM'd download would be
+            // executed inside the app sandbox.
+            if (updateInfo.sha512.isNotBlank()) {
+                onProgress(0.66f, "Verifying download checksum...")
+                val actual = calculateFileSha512(tarGzFile)
+                if (!actual.equals(updateInfo.sha512.trim(), ignoreCase = true)) {
+                    try { tarGzFile.delete() } catch (e: Exception) {}
+                    Log.e(TAG, "Core engine checksum mismatch: expected ${updateInfo.sha512}, got $actual")
+                    return Result.failure(
+                        Exception("Downloaded core engine failed SHA-512 verification (expected ${updateInfo.sha512}, got $actual)")
+                    )
+                }
+                Log.i(TAG, "Core engine download verified against manifest SHA-512")
+            } else {
+                Log.w(TAG, "Manifest did not provide a sha512; skipping checksum verification")
             }
 
             onProgress(0.70f, "Extracting binary package...")
@@ -265,6 +279,20 @@ object CoreUpdateManager {
             }
             return Result.failure(e)
         }
+    }
+
+    /** Streams the file through SHA-512 without loading it into memory. */
+    private fun calculateFileSha512(file: File): String {
+        if (!file.isFile || !file.canRead()) return ""
+        val digest = java.security.MessageDigest.getInstance("SHA-512")
+        BufferedInputStream(FileInputStream(file), 65536).use { input ->
+            val buffer = ByteArray(65536)
+            var read: Int
+            while (input.read(buffer).also { read = it } != -1) {
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun extractTarGzMember(tarGzFile: File, memberName: String, destFile: File): Boolean {

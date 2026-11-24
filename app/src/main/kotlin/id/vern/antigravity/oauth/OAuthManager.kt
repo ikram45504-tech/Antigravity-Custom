@@ -14,6 +14,8 @@ import java.io.File
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
+import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.URL
 import java.net.URLEncoder
@@ -177,8 +179,7 @@ migrations:  {
                             if (needsUpdate) {
                                 target.parentFile?.mkdirs()
                                 target.writeText(content, Charsets.UTF_8)
-                                target.setReadable(true, false)
-                                target.setWritable(true, false)
+                                restrictToOwner(target)
                             }
                         } catch (e: Exception) {}
                     }
@@ -190,6 +191,21 @@ migrations:  {
         AccountManager.importExistingTokenIfEmpty(context)
     }
 
+    /**
+     * Restricts a credential file to owner read/write only.
+     *
+     * These files hold OAuth refresh tokens, which are long-lived credentials.
+     * Writing them world-readable (`setReadable(true, false)`) exposed them to
+     * any other UID on a rooted or multi-user device.
+     */
+    private fun restrictToOwner(file: File) {
+        try {
+            file.setReadable(true, true)
+            file.setWritable(true, true)
+            file.setExecutable(false, false)
+        } catch (e: Exception) {}
+    }
+
     fun syncCompanionStateFiles(context: Context) {
         val dirs = getTargetDirs(context)
         for (dir in dirs) {
@@ -198,17 +214,17 @@ migrations:  {
                 val jetskiState = File(dir, "jetski_state.pbtxt")
                 if (!jetskiState.exists() || jetskiState.length() == 0L) {
                     jetskiState.writeText(JETSKI_STATE_CONTENT, Charsets.UTF_8)
-                    jetskiState.setReadable(true, false)
+                    restrictToOwner(jetskiState)
                 }
                 val agyState = File(dir, "antigravity_state.pbtxt")
                 if (!agyState.exists() || agyState.length() == 0L) {
                     agyState.writeText(JETSKI_STATE_CONTENT, Charsets.UTF_8)
-                    agyState.setReadable(true, false)
+                    restrictToOwner(agyState)
                 }
                 val idFile = File(dir, "installation_id")
                 if (!idFile.exists() || idFile.length() == 0L) {
                     idFile.writeText(INSTALLATION_ID, Charsets.UTF_8)
-                    idFile.setReadable(true, false)
+                    restrictToOwner(idFile)
                 }
             } catch (e: Exception) {}
         }
@@ -424,7 +440,7 @@ migrations:  {
                     }
                     if (changed) {
                         target.writeText(json.toString(2), Charsets.UTF_8)
-                        target.setReadable(true, false)
+                        restrictToOwner(target)
                     }
                 } catch (e: Exception) {}
             }
@@ -506,8 +522,7 @@ migrations:  {
             try {
                 target.parentFile?.mkdirs()
                 target.writeText(tokenJson, Charsets.UTF_8)
-                target.setReadable(true, false)
-                target.setWritable(true, false)
+                restrictToOwner(target)
             } catch (e: Exception) {}
         }
         syncCompanionStateFiles(context)
@@ -541,8 +556,7 @@ migrations:  {
             try {
                 target.parentFile?.mkdirs()
                 target.writeText(finalJsonStr, Charsets.UTF_8)
-                target.setReadable(true, false)
-                target.setWritable(true, false)
+                restrictToOwner(target)
             } catch (e: Exception) {}
         }
         syncCompanionStateFiles(context)
@@ -603,36 +617,88 @@ migrations:  {
         return Pair(url, verifier)
     }
 
-    fun buildAuthUrl(redirectUri: String): String {
+    /**
+     * Builds the authorization URL for the loopback (installed-app) flow.
+     *
+     * Always supplies PKCE as well as a random [state]. Without `state` the
+     * callback cannot be tied to *this* authorization request, so any other
+     * local process that manages to reach the loopback callback could inject
+     * its own authorization code and have the app store a token for an
+     * attacker-controlled account.
+     */
+    fun buildAuthUrl(
+        redirectUri: String,
+        codeChallenge: String? = null,
+        state: String? = null
+    ): String {
         val encodedRedirect = URLEncoder.encode(redirectUri, "UTF-8")
         val encodedScopes = URLEncoder.encode(SCOPES, "UTF-8")
         val encodedClientId = URLEncoder.encode(CLIENT_ID, "UTF-8")
 
-        return "https://accounts.google.com/o/oauth2/v2/auth" +
-                "?client_id=$encodedClientId" +
-                "&redirect_uri=$encodedRedirect" +
-                "&response_type=code" +
-                "&scope=$encodedScopes" +
-                "&access_type=offline" +
-                "&prompt=consent"
+        return buildString {
+            append("https://accounts.google.com/o/oauth2/v2/auth")
+            append("?client_id=").append(encodedClientId)
+            append("&redirect_uri=").append(encodedRedirect)
+            append("&response_type=code")
+            append("&scope=").append(encodedScopes)
+            append("&access_type=offline")
+            append("&prompt=consent")
+            if (!codeChallenge.isNullOrBlank()) {
+                append("&code_challenge=").append(URLEncoder.encode(codeChallenge, "UTF-8"))
+                append("&code_challenge_method=S256")
+            }
+            if (!state.isNullOrBlank()) {
+                append("&state=").append(URLEncoder.encode(state, "UTF-8"))
+            }
+        }
+    }
+
+    /** Generates a base64url random token suitable for PKCE verifiers or `state`. */
+    private fun randomToken(byteCount: Int = 32): String {
+        val bytes = ByteArray(byteCount)
+        SecureRandom().nextBytes(bytes)
+        return Base64.encodeToString(
+            bytes,
+            Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP
+        ).trim()
+    }
+
+    /** RFC 7636 S256 challenge for a PKCE verifier. */
+    private fun pkceChallenge(verifier: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII))
+        return Base64.encodeToString(
+            digest,
+            Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP
+        ).trim()
     }
 
     @Volatile
     private var activeServerSocket: ServerSocket? = null
 
-    private fun extractCodeFromRequest(requestLine: String): String? {
+    /**
+     * Extracts `code` and `state` from the callback request line.
+     * Returns null when no `code` query parameter is present.
+     */
+    private fun extractCodeAndStateFromRequest(requestLine: String): Pair<String, String?>? {
         if (!requestLine.contains("code=")) return null
         return try {
-            val query = requestLine.substringAfter("?").substringBefore(" ")
-            val params = query.split("&").associate {
-                val p = it.split("=")
-                if (p.size == 2) p[0] to p[1] else "" to ""
+            val query = requestLine.substringAfter("?", "").substringBefore(" ")
+            val params = mutableMapOf<String, String>()
+            for (pair in query.split("&")) {
+                val idx = pair.indexOf('=')
+                if (idx <= 0) continue
+                val key = pair.substring(0, idx)
+                val value = pair.substring(idx + 1)
+                params[key] = try {
+                    java.net.URLDecoder.decode(value, "UTF-8")
+                } catch (e: Exception) {
+                    value
+                }
             }
-            val rawCode = params["code"] ?: return null
-            java.net.URLDecoder.decode(rawCode, "UTF-8")
+            val code = params["code"] ?: return null
+            code to params["state"]
         } catch (e: Exception) {
-            val after = requestLine.substringAfter("code=").substringBefore("&").substringBefore(" ")
-            try { java.net.URLDecoder.decode(after, "UTF-8") } catch (e: Exception) { after }
+            null
         }
     }
 
@@ -779,14 +845,23 @@ migrations:  {
 
         var serverSocket: ServerSocket? = null
         try {
+            // Bind to loopback only. Binding 0.0.0.0 exposed the OAuth callback
+            // to every host on the local network (and to every other app on the
+            // device), which allowed injecting an attacker's authorization code.
             serverSocket = ServerSocket().apply {
                 reuseAddress = true
-                bind(java.net.InetSocketAddress("0.0.0.0", CALLBACK_PORT))
+                bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), CALLBACK_PORT))
             }
             activeServerSocket = serverSocket
 
             val redirectUri = "http://127.0.0.1:$CALLBACK_PORT/oauth/callback"
-            val authUrl = buildAuthUrl(redirectUri)
+            val codeVerifier = randomToken(32)
+            val expectedState = randomToken(16)
+            val authUrl = buildAuthUrl(
+                redirectUri = redirectUri,
+                codeChallenge = pkceChallenge(codeVerifier),
+                state = expectedState
+            )
 
             withContext(Dispatchers.Main) {
                 try {
@@ -802,8 +877,9 @@ migrations:  {
             serverSocket.soTimeout = 180000
             var clientSocket: java.net.Socket? = null
             var code: String? = null
+            var stateMismatch = false
 
-            while (code == null && !serverSocket.isClosed) {
+            while (code == null && !stateMismatch && !serverSocket.isClosed) {
                 val sock = try {
                     serverSocket.accept()
                 } catch (e: Exception) {
@@ -811,18 +887,45 @@ migrations:  {
                 }
                 val reader = BufferedReader(InputStreamReader(sock.getInputStream(), StandardCharsets.UTF_8))
                 val reqLine = reader.readLine() ?: ""
-                val extracted = extractCodeFromRequest(reqLine)
-                if (extracted != null) {
-                    code = extracted
-                    clientSocket = sock
-                } else {
+                val extracted = extractCodeAndStateFromRequest(reqLine)
+                if (extracted == null) {
                     try {
                         val out = OutputStreamWriter(sock.getOutputStream(), StandardCharsets.UTF_8)
                         out.write("HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
                         out.flush()
                         sock.close()
                     } catch (e: Exception) {}
+                    continue
                 }
+
+                val (extractedCode, returnedState) = extracted
+                // Reject callbacks that do not belong to this authorization
+                // request. Comparing in constant time is not critical here
+                // (state is not a long-lived secret) but the equality check is.
+                if (returnedState != expectedState) {
+                    Log.w(TAG, "OAuth callback rejected: state mismatch")
+                    stateMismatch = true
+                    try {
+                        val out = OutputStreamWriter(sock.getOutputStream(), StandardCharsets.UTF_8)
+                        out.write(
+                            "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain; charset=utf-8\r\n" +
+                                "Content-Length: 22\r\nConnection: close\r\n\r\nInvalid state received."
+                        )
+                        out.flush()
+                        sock.close()
+                    } catch (e: Exception) {}
+                    continue
+                }
+
+                code = extractedCode
+                clientSocket = sock
+            }
+
+            if (stateMismatch) {
+                withContext(Dispatchers.Main) {
+                    onError("Sign in was cancelled or tampered with (OAuth state mismatch). Please try again.")
+                }
+                return@withContext
             }
 
             if (code != null && clientSocket != null) {
@@ -844,7 +947,9 @@ migrations:  {
                     context = context,
                     code = code,
                     redirectUri = redirectUri,
-                    codeVerifier = null,
+                    // The challenge was sent with the auth request, so the
+                    // matching verifier must be presented at exchange time.
+                    codeVerifier = codeVerifier,
                     onSuccess = { email ->
                         userEmail = email
                     },
