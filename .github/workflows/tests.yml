@@ -84,6 +84,19 @@ jobs:
 
           exit 1
 
+      # Guard against a hollow green build: `testDebugUnitTest` also succeeds when
+      # it discovers zero tests, which would hide a mis-registered source set.
+      - name: Verify tests actually ran
+        if: steps.unit_tests.outcome == 'success'
+        run: |
+          set -euo pipefail
+          count=$(find app/build/test-results -name 'TEST-*.xml' -exec             python3 -c 'import sys,xml.etree.ElementTree as E;print(sum(int(E.parse(f).getroot().get("tests",0)) for f in sys.argv[1:]))' {} + 2>/dev/null || echo 0)
+          echo "Collected ${count} JVM unit tests"
+          if [ "${count}" -lt 1 ]; then
+            echo "::error::No JVM unit tests were executed - check the test source dir"
+            exit 1
+          fi
+
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
