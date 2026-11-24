@@ -132,6 +132,14 @@ android {
         }
     }
 
+    // Be explicit that unit tests live in src/test/kotlin rather than relying on
+    // the Kotlin plugin's default source-dir registration.
+    sourceSets {
+        getByName("test") {
+            java.srcDir("src/test/kotlin")
+        }
+    }
+
     lint {
         abortOnError = false
         checkReleaseBuilds = false

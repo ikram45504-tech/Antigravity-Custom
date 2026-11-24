@@ -153,7 +153,7 @@ class CustomizationInstallerDelegate {
         val tmpCloneDir = File(context.cacheDir, "skill-clone-${skillItem.id}").absolutePath
         val gitEnvSetup = CustomizationTracker.prepareGitEnv(context)
         val (cleanUrl, extractedSub) = normalizeGitRepoUrl(skillItem.repoUrl)
-        val effectiveSubPath = sanitizeSubPath(skillItem.subPath?.ifBlank { null } ?: extractedSub)
+        val effectiveSubPath = CustomizationTracker.sanitizeSubPath(skillItem.subPath?.ifBlank { null } ?: extractedSub)
 
         val cmd = buildString {
             append(gitEnvSetup)
@@ -277,7 +277,7 @@ class CustomizationInstallerDelegate {
         val tmpDir = File(context.cacheDir, "plugin-clone-${pluginItem.id}").absolutePath
         val gitEnvSetup = CustomizationTracker.prepareGitEnv(context)
         val (cleanUrl, extractedSub) = normalizeGitRepoUrl(pluginItem.repoUrl)
-        val effectiveSubPath = sanitizeSubPath(pluginItem.subPath?.ifBlank { null } ?: extractedSub)
+        val effectiveSubPath = CustomizationTracker.sanitizeSubPath(pluginItem.subPath?.ifBlank { null } ?: extractedSub)
 
         val rawCmd = when (pluginItem.id.lowercase()) {
             "rtk" -> {
@@ -522,7 +522,7 @@ class CustomizationInstallerDelegate {
             repoInspectionError.value = "Invalid repository URL"
             return
         }
-        val effectiveSubPath = sanitizeSubPath(subPath?.ifBlank { null } ?: extractedSub)
+        val effectiveSubPath = CustomizationTracker.sanitizeSubPath(subPath?.ifBlank { null } ?: extractedSub)
         val safeName = if (customName.isNotBlank()) {
             customName.trim().lowercase().replace(" ", "-").replace(Regex("[^a-z0-9_-]"), "")
         } else {
