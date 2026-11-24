@@ -32,8 +32,46 @@ jobs:
         run: chmod +x gradlew
 
       # Pure JVM tests only: no device or emulator required.
+      # Gradle output is tee'd so that compile errors (which are otherwise buried
+      # in the raw job log) are re-emitted as check-run annotations, where they
+      # show up directly on the pull request.
       - name: Run JVM unit tests
-        run: ./gradlew testDebugUnitTest --stacktrace
+        run: |
+          set -o pipefail
+          ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee gradle-test.log
+        continue-on-error: true
+        id: unit_tests
+
+      - name: Surface compile/test failures as annotations
+        if: steps.unit_tests.outcome != 'success'
+        run: |
+          set -uo pipefail
+          echo "### Unit test / compile failures" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          # Kotlin compiler diagnostics look like:  e: file:///path/File.kt:12:5 message
+          grep -E '^e: ' gradle-test.log | head -40 > kotlin-errors.txt || true
+          while IFS= read -r line; do
+            raw=$(echo "$line" | sed -E 's#^e: file://([^:]+):([0-9]+).*#\1#')
+            num=$(echo "$line" | sed -E 's#^e: file://([^:]+):([0-9]+).*#\2#')
+            msg=$(echo "$line" | sed -E 's#^e: file://[^ ]+ (.*)#\1#')
+            # Annotations need a repo-relative path; strip the runner workspace prefix.
+            # /home/runner/work/<repo>/<repo>/app/... -> strip through the
+            # repo directory (the first path segment repeated twice).
+            file="${raw#"$GITHUB_WORKSPACE"/}"
+            if [ -n "$raw" ] && [ -n "$num" ] && [ "$file" != "$raw" ]; then
+              echo "::error file=${file},line=${num}::${msg}"
+            else
+              echo "::error::${line}"
+            fi
+          done < kotlin-errors.txt
+
+          # JUnit failures and Gradle's own summary.
+          grep -E 'FAILED|What went wrong|Caused by|There were failing tests' -A 3 gradle-test.log | head -60 >> "$GITHUB_STEP_SUMMARY" || true
+          grep -E '^e: ' gradle-test.log | head -40 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          exit 1
 
       - name: Upload test reports
         if: always()
