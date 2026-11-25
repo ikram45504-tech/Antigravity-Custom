@@ -27,8 +27,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AccountCircle
@@ -171,23 +173,21 @@ fun ProjectChatsDropdownMenu(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            LazyColumn(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState())
             ) {
                 if (pinnedConversations.isNotEmpty()) {
-                    item {
-                        Text(
-                            text = stringResource(R.string.drawer_pinned_title),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
-                        )
-                    }
-                    items(pinnedConversations.size) { idx ->
-                        val convo = pinnedConversations[idx]
+                    Text(
+                        text = stringResource(R.string.drawer_pinned_title),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                    )
+                    pinnedConversations.forEach { convo ->
                         DropdownConversationRow(
                             convo = convo,
                             isActive = convo.id == activeConversationId,
@@ -204,91 +204,86 @@ fun ProjectChatsDropdownMenu(
                             }
                         )
                     }
-                    item { Spacer(modifier = Modifier.height(6.dp)) }
+                    Spacer(modifier = Modifier.height(6.dp))
                 }
 
-                item {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 6.dp, vertical = 4.dp)
-                    ) {
-                        Text(
-                            text = stringResource(R.string.drawer_projects_title),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box {
-                                IconButton(
-                                    onClick = { showSortMenu = true },
-                                    modifier = Modifier.size(24.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.FilterList,
-                                        contentDescription = stringResource(R.string.drawer_sort_projects),
-                                        modifier = Modifier.size(15.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                DropdownMenu(
-                                    expanded = showSortMenu,
-                                    onDismissRequest = { showSortMenu = false },
-                                    shape = RoundedCornerShape(14.dp),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-                                ) {
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(R.string.sort_name_asc), fontSize = 13.sp) },
-                                        onClick = { onSelectSortOrder(ProjectSortOrder.NAME_ASC); showSortMenu = false }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(R.string.sort_name_desc), fontSize = 13.sp) },
-                                        onClick = { onSelectSortOrder(ProjectSortOrder.NAME_DESC); showSortMenu = false }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(R.string.sort_date_desc), fontSize = 13.sp) },
-                                        onClick = { onSelectSortOrder(ProjectSortOrder.DATE_DESC); showSortMenu = false }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(R.string.sort_date_asc), fontSize = 13.sp) },
-                                        onClick = { onSelectSortOrder(ProjectSortOrder.DATE_ASC); showSortMenu = false }
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.width(2.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.drawer_projects_title),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box {
                             IconButton(
-                                onClick = {
-                                    onDismiss()
-                                    onRequestNewProject()
-                                },
+                                onClick = { showSortMenu = true },
                                 modifier = Modifier.size(24.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.CreateNewFolder,
-                                    contentDescription = stringResource(R.string.drawer_add_project_folder),
-                                    modifier = Modifier.size(16.dp),
+                                    imageVector = Icons.Default.FilterList,
+                                    contentDescription = stringResource(R.string.drawer_sort_projects),
+                                    modifier = Modifier.size(15.dp),
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
+                            DropdownMenu(
+                                expanded = showSortMenu,
+                                onDismissRequest = { showSortMenu = false },
+                                shape = RoundedCornerShape(14.dp),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.sort_name_asc), fontSize = 13.sp) },
+                                    onClick = { onSelectSortOrder(ProjectSortOrder.NAME_ASC); showSortMenu = false }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.sort_name_desc), fontSize = 13.sp) },
+                                    onClick = { onSelectSortOrder(ProjectSortOrder.NAME_DESC); showSortMenu = false }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.sort_date_desc), fontSize = 13.sp) },
+                                    onClick = { onSelectSortOrder(ProjectSortOrder.DATE_DESC); showSortMenu = false }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.sort_date_asc), fontSize = 13.sp) },
+                                    onClick = { onSelectSortOrder(ProjectSortOrder.DATE_ASC); showSortMenu = false }
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(2.dp))
+                        IconButton(
+                            onClick = {
+                                onDismiss()
+                                onRequestNewProject()
+                            },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CreateNewFolder,
+                                contentDescription = stringResource(R.string.drawer_add_project_folder),
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
 
                 if (projectList.isEmpty()) {
-                    item {
-                        Text(
-                            text = stringResource(R.string.drawer_projects_empty),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
-                        )
-                    }
+                    Text(
+                        text = stringResource(R.string.drawer_projects_empty),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                    )
                 } else {
-                    items(projectList.size) { idx ->
-                        val projectDir = projectList[idx]
+                    projectList.forEach { projectDir ->
                         val isCurrent = projectDir.absolutePath == currentWorkspace
                         val convoListForProject = conversationHistory
                             .filter { it.projectPath == projectDir.absolutePath }
@@ -431,18 +426,15 @@ fun ProjectChatsDropdownMenu(
                 }
 
                 if (unassignedConversations.isNotEmpty()) {
-                    item {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = stringResource(R.string.drawer_recent_title),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
-                        )
-                    }
-                    items(unassignedConversations.size) { idx ->
-                        val convo = unassignedConversations[idx]
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = stringResource(R.string.drawer_recent_title),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                    )
+                    unassignedConversations.forEach { convo ->
                         DropdownConversationRow(
                             convo = convo,
                             isActive = convo.id == activeConversationId,
