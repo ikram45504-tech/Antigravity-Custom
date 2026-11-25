@@ -25,6 +25,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -70,7 +71,9 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material.icons.filled.Settings
@@ -81,11 +84,14 @@ import android.widget.Toast
 import androidx.core.content.ContextCompat
 import id.vern.antigravity.data.MessageStatus
 import id.vern.antigravity.data.RunningSubagent
+import id.vern.antigravity.data.ThemeMode
 import id.vern.antigravity.voice.LiveVoiceController
 import id.vern.antigravity.voice.VoiceLanguage
 import id.vern.antigravity.ui.components.AgentDetailsBottomSheet
 import id.vern.antigravity.ui.components.DialogBlurEffect
 import id.vern.antigravity.ui.components.InstallationProgressDialog
+import id.vern.antigravity.ui.components.ProjectChatsDropdownMenu
+import id.vern.antigravity.ui.components.RightSystemSetupPanel
 import id.vern.antigravity.ui.components.SubagentChatBottomSheet
 import id.vern.antigravity.viewmodel.ConversationSummary
 import java.io.File
@@ -101,16 +107,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.rememberDrawerState
-import androidx.compose.material3.DrawerValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.text.style.TextOverflow
@@ -165,7 +167,8 @@ fun ChatScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
-    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    var showProjectChatsDropdown by remember { mutableStateOf(false) }
+    var showRightSetupPanel by remember { mutableStateOf(false) }
 
     val messages by viewModel.chatMessages.collectAsStateWithLifecycle()
     val activeConversationId by viewModel.activeConversationId.collectAsStateWithLifecycle()
@@ -624,853 +627,98 @@ fun ChatScreen(
         }
     }
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = {
-            ModalDrawerSheet(
-                drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-                modifier = Modifier
-                    .width(300.dp)
-                    .fillMaxHeight()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp)
-                ) {
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 16.dp)
-                    ) {
-                        Image(
-                            painter = painterResource(id = R.drawable.ic_launcher_logo),
-                            contentDescription = stringResource(id = R.string.app_name),
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = stringResource(id = R.string.app_name),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable {
-                                viewModel.startNewConversation(context)
-                                scope.launch { drawerState.close() }
-                            }
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = stringResource(R.string.chat_new_conversation),
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = stringResource(R.string.chat_new_conversation),
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    val pinnedConversations = conversationHistory.filter { it.isPinned }
-                    val unpinnedConversations = conversationHistory.filter { !it.isPinned }
-
-                    LazyColumn(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                    ) {
-
-                        item {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 4.dp, vertical = 6.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .clickable { isPinnedExpanded = !isPinnedExpanded }
-                                        .padding(vertical = 2.dp, horizontal = 2.dp)
-                                ) {
-                                    Text(
-                                        text = stringResource(R.string.drawer_pinned_title),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Icon(
-                                        imageVector = Icons.Default.KeyboardArrowDown,
-                                        contentDescription = null,
-                                        modifier = Modifier
-                                            .size(16.dp)
-                                            .rotate(pinnedArrowRotation),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-
-                                Box {
-                                    IconButton(
-                                        onClick = { showPinnedMenu = true },
-                                        modifier = Modifier.size(28.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.MoreVert,
-                                            contentDescription = stringResource(R.string.chat_pinned_options),
-                                            modifier = Modifier.size(16.dp),
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                    DropdownMenu(
-                                        expanded = showPinnedMenu,
-                                        onDismissRequest = { showPinnedMenu = false },
-                                        shape = RoundedCornerShape(16.dp),
-                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-                                    ) {
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(if (isPinnedExpanded) R.string.drawer_collapse_section else R.string.drawer_expand_section), fontSize = 13.sp) },
-                                            onClick = {
-                                                isPinnedExpanded = !isPinnedExpanded
-                                                showPinnedMenu = false
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        item {
-                            AnimatedVisibility(
-                                visible = isPinnedExpanded,
-                                enter = expandVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(tween(200)),
-                                exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) + fadeOut(tween(150))
-                            ) {
-                                Column(modifier = Modifier.fillMaxWidth().animateContentSize()) {
-                                    if (pinnedConversations.isEmpty()) {
-                                        Text(
-                                            text = stringResource(R.string.drawer_pinned_empty),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                            modifier = Modifier.padding(start = 8.dp, bottom = 8.dp)
-                                        )
-                                    } else {
-                                        pinnedConversations.forEach { convo ->
-                                            Surface(
-                                                shape = RoundedCornerShape(8.dp),
-                                                color = Color.Transparent,
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .clickable {
-                                                        viewModel.loadConversation(context, convo)
-                                                        scope.launch { drawerState.close() }
-                                                    }
-                                            ) {
-                                                Row(
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
-                                                ) {
-                                                    if (convo.id in executingConversationIds) {
-                                                        CircularProgressIndicator(
-                                                            modifier = Modifier.size(12.dp),
-                                                            strokeWidth = 1.8.dp,
-                                                            color = AntigravityBlue
-                                                        )
-                                                        Spacer(modifier = Modifier.width(6.dp))
-                                                    }
-                                                    Text(
-                                                        text = convo.title,
-                                                        style = MaterialTheme.typography.bodyMedium,
-                                                        color = MaterialTheme.colorScheme.onSurface,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis,
-                                                        modifier = Modifier.weight(1f)
-                                                    )
-                                                    Spacer(modifier = Modifier.width(6.dp))
-                                                    Text(
-                                                        text = formatRelativeTime(convo.timestamp),
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                                        fontSize = 12.sp
-                                                    )
-                                                    Spacer(modifier = Modifier.width(2.dp))
-                                                    var showConvoMenu by remember { mutableStateOf(false) }
-                                                    Box {
-                                                        IconButton(
-                                                            onClick = { showConvoMenu = true },
-                                                            modifier = Modifier.size(24.dp)
-                                                        ) {
-                                                            Icon(
-                                                                imageVector = Icons.Default.MoreVert,
-                                                                contentDescription = stringResource(R.string.common_options),
-                                                                modifier = Modifier.size(14.dp),
-                                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                                                            )
-                                                        }
-                                                        DropdownMenu(
-                                                            expanded = showConvoMenu,
-                                                            onDismissRequest = { showConvoMenu = false },
-                                                            shape = RoundedCornerShape(16.dp),
-                                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-                                                        ) {
-                                                            DropdownMenuItem(
-                                                                text = { Text(stringResource(R.string.menu_unpin_conversation)) },
-                                                                leadingIcon = {
-                                                                    Icon(Icons.Default.PushPin, contentDescription = null, modifier = Modifier.size(18.dp))
-                                                                },
-                                                                onClick = {
-                                                                    showConvoMenu = false
-                                                                    viewModel.togglePinConversation(convo.id, context = context)
-                                                                }
-                                                            )
-                                                            DropdownMenuItem(
-                                                                text = { Text(stringResource(R.string.menu_delete_conversation), color = AntigravityRed) },
-                                                                leadingIcon = {
-                                                                    Icon(Icons.Default.Delete, contentDescription = null, tint = AntigravityRed, modifier = Modifier.size(18.dp))
-                                                                },
-                                                                onClick = {
-                                                                    showConvoMenu = false
-                                                                    conversationToDelete = convo
-                                                                    showDeleteSpecificConversationDialog = true
-                                                                }
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        item {
-                            Spacer(modifier = Modifier.height(14.dp))
-                        }
-
-                        item {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 4.dp, vertical = 6.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .clickable { isProjectsExpanded = !isProjectsExpanded }
-                                        .padding(vertical = 2.dp, horizontal = 2.dp)
-                                ) {
-                                    Text(
-                                        text = stringResource(R.string.drawer_projects_title),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Icon(
-                                        imageVector = Icons.Default.KeyboardArrowDown,
-                                        contentDescription = null,
-                                        modifier = Modifier
-                                            .size(16.dp)
-                                            .rotate(projectsArrowRotation),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box {
-                                        IconButton(
-                                            onClick = { showSortMenu = true },
-                                            modifier = Modifier.size(28.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.FilterList,
-                                                contentDescription = stringResource(R.string.drawer_sort_projects),
-                                                modifier = Modifier.size(16.dp),
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                        DropdownMenu(
-                                            expanded = showSortMenu,
-                                            onDismissRequest = { showSortMenu = false },
-                                            shape = RoundedCornerShape(16.dp),
-                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-                                        ) {
-                                            DropdownMenuItem(
-                                                text = { Text(stringResource(R.string.sort_name_asc), fontSize = 13.sp) },
-                                                onClick = {
-                                                    viewModel.setProjectSortOrder(context, ProjectSortOrder.NAME_ASC)
-                                                    showSortMenu = false
-                                                }
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text(stringResource(R.string.sort_name_desc), fontSize = 13.sp) },
-                                                onClick = {
-                                                    viewModel.setProjectSortOrder(context, ProjectSortOrder.NAME_DESC)
-                                                    showSortMenu = false
-                                                }
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text(stringResource(R.string.sort_date_desc), fontSize = 13.sp) },
-                                                onClick = {
-                                                    viewModel.setProjectSortOrder(context, ProjectSortOrder.DATE_DESC)
-                                                    showSortMenu = false
-                                                }
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text(stringResource(R.string.sort_date_asc), fontSize = 13.sp) },
-                                                onClick = {
-                                                    viewModel.setProjectSortOrder(context, ProjectSortOrder.DATE_ASC)
-                                                    showSortMenu = false
-                                                }
-                                            )
-                                        }
-                                    }
-
-                                    Spacer(modifier = Modifier.width(2.dp))
-
-                                    IconButton(
-                                        onClick = {
-                                            newProjectName = ""
-                                            showNewProjectDialog = true
-                                        },
-                                        modifier = Modifier.size(28.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.CreateNewFolder,
-                                            contentDescription = stringResource(R.string.drawer_add_project_folder),
-                                            modifier = Modifier.size(18.dp),
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        item {
-                            AnimatedVisibility(
-                                visible = isProjectsExpanded,
-                                enter = expandVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(tween(200)),
-                                exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) + fadeOut(tween(150))
-                            ) {
-                                Column(modifier = Modifier.fillMaxWidth().animateContentSize()) {
-                                    if (projectList.isEmpty()) {
-                                        Text(
-                                            text = stringResource(R.string.drawer_projects_empty),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                            modifier = Modifier.padding(start = 8.dp, bottom = 8.dp)
-                                        )
-                                    } else {
-                                        projectList.forEach { projectDir ->
-                                    val isCurrent = projectDir.absolutePath == currentWorkspace
-                                    val convoListForProject = conversationHistory.filter { it.projectPath == projectDir.absolutePath }
-
-                                    Column(modifier = Modifier.fillMaxWidth()) {
-                                        Surface(
-                                            shape = RoundedCornerShape(8.dp),
-                                            color = if (isCurrent) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent,
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .clickable {
-                                                    viewModel.setWorkspacePath(context, projectDir.absolutePath)
-                                                    scope.launch { drawerState.close() }
-                                                }
-                                        ) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
-                                            ) {
-                                                Row(
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    modifier = Modifier.weight(1f)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Folder,
-                                                        contentDescription = null,
-                                                        modifier = Modifier.size(16.dp),
-                                                        tint = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
-                                                    Spacer(modifier = Modifier.width(8.dp))
-                                                    Text(
-                                                        text = projectDir.name,
-                                                        style = MaterialTheme.typography.bodyMedium,
-                                                        fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-                                                        color = MaterialTheme.colorScheme.onSurface,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                }
-
-                                                Row(verticalAlignment = Alignment.CenterVertically) {
-
-                                                    IconButton(
-                                                        onClick = {
-                                                            viewModel.startNewConversation(context, projectDir.absolutePath)
-                                                            scope.launch { drawerState.close() }
-                                                        },
-                                                        modifier = Modifier.size(24.dp)
-                                                    ) {
-                                                        Icon(
-                                                            imageVector = Icons.Default.Add,
-                                                            contentDescription = stringResource(R.string.menu_new_chat_in_project),
-                                                            modifier = Modifier.size(16.dp),
-                                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                                        )
-                                                    }
-
-                                                    var showProjectMenu by remember { mutableStateOf(false) }
-                                                    Box {
-                                                        IconButton(
-                                                            onClick = { showProjectMenu = true },
-                                                            modifier = Modifier.size(24.dp)
-                                                        ) {
-                                                            Icon(
-                                                                imageVector = Icons.Default.MoreVert,
-                                                                contentDescription = stringResource(R.string.menu_project_options),
-                                                                modifier = Modifier.size(16.dp),
-                                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                                            )
-                                                        }
-                                                        DropdownMenu(
-                                                            expanded = showProjectMenu,
-                                                            onDismissRequest = { showProjectMenu = false },
-                                                            shape = RoundedCornerShape(16.dp),
-                                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-                                                        ) {
-                                                            DropdownMenuItem(
-                                                                text = { Text(stringResource(R.string.menu_new_chat_in_project)) },
-                                                                leadingIcon = {
-                                                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                                                                },
-                                                                onClick = {
-                                                                    showProjectMenu = false
-                                                                    viewModel.startNewConversation(context, projectDir.absolutePath)
-                                                                    scope.launch { drawerState.close() }
-                                                                }
-                                                            )
-                                                            DropdownMenuItem(
-                                                                text = { Text(stringResource(R.string.menu_project_integrations)) },
-                                                                leadingIcon = {
-                                                                    Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(18.dp))
-                                                                },
-                                                                onClick = {
-                                                                    showProjectMenu = false
-                                                                    viewModel.setIntegrationTargetProject(context, projectDir.absolutePath)
-                                                                    settingsInitialPage = SettingsPage.CLOUD_INTEGRATIONS
-                                                                    showSettingsBottomSheet = true
-                                                                    scope.launch { drawerState.close() }
-                                                                }
-                                                            )
-                                                            DropdownMenuItem(
-                                                                text = { Text(stringResource(R.string.menu_delete_project_plain), color = AntigravityRed) },
-                                                                leadingIcon = {
-                                                                    Icon(Icons.Default.Delete, contentDescription = null, tint = AntigravityRed, modifier = Modifier.size(18.dp))
-                                                                },
-                                                                onClick = {
-                                                                    showProjectMenu = false
-                                                                    projectToDelete = projectDir
-                                                                    showDeleteProjectDialog = true
-                                                                }
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        if (convoListForProject.isEmpty()) {
-                                            Text(
-                                                text = stringResource(R.string.drawer_project_convos_empty),
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                                fontSize = 12.sp,
-                                                modifier = Modifier.padding(start = 32.dp, top = 2.dp, bottom = 6.dp)
-                                            )
-                                        } else {
-                                            convoListForProject.forEach { c ->
-                                                Surface(
-                                                    shape = RoundedCornerShape(6.dp),
-                                                    color = Color.Transparent,
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .clip(RoundedCornerShape(6.dp))
-                                                        .clickable {
-                                                            viewModel.loadConversation(context, c)
-                                                            scope.launch { drawerState.close() }
-                                                        }
-                                                ) {
-                                                    Row(
-                                                        verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                                        modifier = Modifier.padding(start = 32.dp, end = 4.dp, top = 2.dp, bottom = 2.dp)
-                                                    ) {
-                                                        if (c.id in executingConversationIds) {
-                                                            CircularProgressIndicator(
-                                                                modifier = Modifier.size(11.dp),
-                                                                strokeWidth = 1.6.dp,
-                                                                color = AntigravityBlue
-                                                            )
-                                                            Spacer(modifier = Modifier.width(5.dp))
-                                                        }
-                                                        Text(
-                                                            text = c.title,
-                                                            style = MaterialTheme.typography.bodySmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis,
-                                                            modifier = Modifier.weight(1f)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(6.dp))
-                                                        Text(
-                                                            text = formatRelativeTime(c.timestamp),
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(2.dp))
-                                                        var showProjectConvoMenu by remember { mutableStateOf(false) }
-                                                        Box {
-                                                            IconButton(
-                                                                onClick = { showProjectConvoMenu = true },
-                                                                modifier = Modifier.size(20.dp)
-                                                            ) {
-                                                                Icon(
-                                                                    imageVector = Icons.Default.MoreVert,
-                                                                    contentDescription = stringResource(R.string.common_options),
-                                                                    modifier = Modifier.size(14.dp),
-                                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                                                                )
-                                                            }
-                                                            DropdownMenu(
-                                                                expanded = showProjectConvoMenu,
-                                                                onDismissRequest = { showProjectConvoMenu = false },
-                                                                shape = RoundedCornerShape(16.dp),
-                                                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-                                                            ) {
-                                                                DropdownMenuItem(
-                                                                    text = { Text(stringResource(R.string.menu_delete_conversation), color = AntigravityRed) },
-                                                                    leadingIcon = {
-                                                                        Icon(Icons.Default.Delete, contentDescription = null, tint = AntigravityRed, modifier = Modifier.size(18.dp))
-                                                                    },
-                                                                    onClick = {
-                                                                        showProjectConvoMenu = false
-                                                                        conversationToDelete = c
-                                                                        showDeleteSpecificConversationDialog = true
-                                                                    }
-                                                                )
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                        item {
-                            Spacer(modifier = Modifier.height(14.dp))
-                        }
-
-                        item {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 4.dp, vertical = 6.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .clickable { isConversationsExpanded = !isConversationsExpanded }
-                                        .padding(vertical = 2.dp, horizontal = 2.dp)
-                                ) {
-                                    Text(
-                                        text = stringResource(R.string.drawer_conversations_title),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Icon(
-                                        imageVector = Icons.Default.KeyboardArrowDown,
-                                        contentDescription = null,
-                                        modifier = Modifier
-                                            .size(16.dp)
-                                            .rotate(convosArrowRotation),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
-
-                        item {
-                            AnimatedVisibility(
-                                visible = isConversationsExpanded,
-                                enter = expandVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(tween(200)),
-                                exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) + fadeOut(tween(150))
-                            ) {
-                                Column(modifier = Modifier.fillMaxWidth().animateContentSize()) {
-                                    if (unpinnedConversations.isEmpty()) {
-                                        Text(
-                                            text = stringResource(R.string.drawer_recent_empty),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                            modifier = Modifier.padding(start = 8.dp, bottom = 8.dp)
-                                        )
-                                    } else {
-                                        unpinnedConversations.forEach { convo ->
-                                            Surface(
-                                                shape = RoundedCornerShape(8.dp),
-                                                color = Color.Transparent,
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .clickable {
-                                                        viewModel.loadConversation(context, convo)
-                                                        scope.launch { drawerState.close() }
-                                                    }
-                                            ) {
-                                                Row(
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
-                                                ) {
-                                                    if (convo.id in executingConversationIds) {
-                                                        CircularProgressIndicator(
-                                                            modifier = Modifier.size(12.dp),
-                                                            strokeWidth = 1.8.dp,
-                                                            color = AntigravityBlue
-                                                        )
-                                                        Spacer(modifier = Modifier.width(6.dp))
-                                                    }
-                                                    Text(
-                                                        text = convo.title,
-                                                        style = MaterialTheme.typography.bodyMedium,
-                                                        color = MaterialTheme.colorScheme.onSurface,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis,
-                                                        modifier = Modifier.weight(1f)
-                                                    )
-                                                    Spacer(modifier = Modifier.width(6.dp))
-                                                    Text(
-                                                        text = formatRelativeTime(convo.timestamp),
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                                        fontSize = 12.sp
-                                                    )
-                                                    Spacer(modifier = Modifier.width(2.dp))
-                                                    var showUnpinnedMenu by remember { mutableStateOf(false) }
-                                                    Box {
-                                                        IconButton(
-                                                            onClick = { showUnpinnedMenu = true },
-                                                            modifier = Modifier.size(24.dp)
-                                                        ) {
-                                                            Icon(
-                                                                imageVector = Icons.Default.MoreVert,
-                                                                contentDescription = stringResource(R.string.common_options),
-                                                                modifier = Modifier.size(14.dp),
-                                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                                                            )
-                                                        }
-                                                        DropdownMenu(
-                                                            expanded = showUnpinnedMenu,
-                                                            onDismissRequest = { showUnpinnedMenu = false },
-                                                            shape = RoundedCornerShape(16.dp),
-                                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-                                                        ) {
-                                                            DropdownMenuItem(
-                                                                text = { Text(stringResource(R.string.chat_pin_conversation)) },
-                                                                leadingIcon = {
-                                                                    Icon(Icons.Default.PushPin, contentDescription = null, modifier = Modifier.size(18.dp))
-                                                                },
-                                                                onClick = {
-                                                                    showUnpinnedMenu = false
-                                                                    viewModel.togglePinConversation(convo.id)
-                                                                }
-                                                            )
-                                                            DropdownMenuItem(
-                                                                text = { Text(stringResource(R.string.chat_delete_conversation), color = AntigravityRed) },
-                                                                leadingIcon = {
-                                                                    Icon(Icons.Default.Delete, contentDescription = null, tint = AntigravityRed, modifier = Modifier.size(18.dp))
-                                                                },
-                                                                onClick = {
-                                                                    showUnpinnedMenu = false
-                                                                    conversationToDelete = convo
-                                                                    showDeleteSpecificConversationDialog = true
-                                                                }
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable {
-                                scope.launch { drawerState.close() }
-                                if (userEmail == null) {
-                                    viewModel.startGoogleSignIn(context)
-                                } else {
-                                    settingsInitialPage = SettingsPage.ACCOUNT
-                                    showSettingsBottomSheet = true
-                                }
-                            }
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .clip(CircleShape)
-                                    .background(if (userEmail != null) AntigravityGreen.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (!userPicture.isNullOrBlank()) {
-                                    AsyncImage(
-                                        model = userPicture,
-                                        contentDescription = userName,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                } else if (userEmail != null) {
-                                    Text(
-                                        text = (userName.takeIf { it.isNotBlank() } ?: "U").take(1).uppercase(),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = AntigravityGreen
-                                    )
-                                } else {
-                                    Icon(
-                                        imageVector = Icons.Default.AccountCircle,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = if (userEmail != null) userName.ifBlank { "Google User" } else stringResource(R.string.account_sign_in_title),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1
-                                )
-                                Text(
-                                    text = if (userEmail != null) stringResource(R.string.status_authenticated) else stringResource(R.string.account_tap_to_sign_in),
-                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = if (userEmail != null) stringResource(R.string.status_authenticated) else stringResource(R.string.account_btn_sign_in),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = Color.Transparent,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable {
-                                scope.launch { drawerState.close() }
-                                settingsInitialPage = SettingsPage.MAIN
-                                showSettingsBottomSheet = true
-                            }
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = stringResource(R.string.common_settings),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = stringResource(R.string.common_settings),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    ) {
+    Box(modifier = modifier.fillMaxSize()) {
         Scaffold(
             topBar = {
+                val activeProject = projectList.firstOrNull { it.absolutePath == currentWorkspace }
+                val topBarTitleText = activeProject?.name
+                    ?: if (conversationTitle.isNotBlank() && conversationTitle != "New Conversation" && conversationTitle != "Antigravity -Android") {
+                        conversationTitle
+                    } else {
+                        stringResource(R.string.chat_new_conversation)
+                    }
+
                 TopAppBar(
                     title = {
-                        Text(
-                            text = if (conversationTitle.isNotBlank() && conversationTitle != "New Conversation" && conversationTitle != "Antigravity -Android") conversationTitle else stringResource(R.string.chat_new_conversation),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Box {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { showProjectChatsDropdown = true }
+                                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = topBarTitleText,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.widthIn(max = 180.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = Icons.Default.KeyboardArrowDown,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            ProjectChatsDropdownMenu(
+                                expanded = showProjectChatsDropdown,
+                                onDismiss = { showProjectChatsDropdown = false },
+                                projectList = projectList,
+                                currentWorkspace = currentWorkspace,
+                                activeConversationId = activeConversationId,
+                                conversationHistory = conversationHistory,
+                                executingConversationIds = executingConversationIds,
+                                formatRelativeTime = ::formatRelativeTime,
+                                onNewConversation = { projectPath ->
+                                    if (projectPath != null) {
+                                        viewModel.startNewConversationInProject(context, projectPath)
+                                    } else {
+                                        viewModel.startNewConversation(context)
+                                    }
+                                    showProjectChatsDropdown = false
+                                },
+                                onSelectProject = { project ->
+                                    viewModel.selectProject(context, project)
+                                    showProjectChatsDropdown = false
+                                },
+                                onSelectConversation = { convo ->
+                                    viewModel.loadConversation(context, convo)
+                                    showProjectChatsDropdown = false
+                                },
+                                onTogglePinConversation = { id ->
+                                    viewModel.togglePinConversation(id, context = context)
+                                },
+                                onRequestDeleteConversation = { convo ->
+                                    conversationToDelete = convo
+                                    showDeleteSpecificConversationDialog = true
+                                    showProjectChatsDropdown = false
+                                },
+                                onOpenProjectIntegrations = { project ->
+                                    viewModel.selectProject(context, project)
+                                    settingsInitialPage = SettingsPage.GITHUB
+                                    showSettingsBottomSheet = true
+                                    showProjectChatsDropdown = false
+                                },
+                                onRequestDeleteProject = { project ->
+                                    projectToDelete = project
+                                    showDeleteProjectDialog = true
+                                    showProjectChatsDropdown = false
+                                },
+                                onRequestNewProject = {
+                                    showNewProjectDialog = true
+                                    showProjectChatsDropdown = false
+                                },
+                                onSelectSortOrder = { order ->
+                                    viewModel.setProjectSortOrder(context, order)
+                                }
+                            )
+                        }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = MaterialTheme.colorScheme.background,
@@ -1484,7 +732,7 @@ fun ChatScreen(
                             if (onNavigateBack != null) {
                                 onNavigateBack()
                             } else {
-                                scope.launch { drawerState.open() }
+                                showProjectChatsDropdown = true
                             }
                         }) {
                             Icon(
@@ -1630,12 +878,34 @@ fun ChatScreen(
                             }
                         }
 
+                        val isLightMode = appearance.themeMode == ThemeMode.LIGHT ||
+                            (appearance.themeMode == ThemeMode.SYSTEM && !isSystemInDarkTheme())
+                        IconButton(onClick = {
+                            viewModel.setThemeMode(context, if (isLightMode) ThemeMode.DARK else ThemeMode.LIGHT)
+                        }) {
+                            Icon(
+                                imageVector = if (isLightMode) Icons.Default.DarkMode else Icons.Default.LightMode,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
                         IconButton(onClick = {
                             detailsBottomSheetTab = 0
                             showDetailsBottomSheet = true
                         }) {
                             SidePanelIcon(
                                 tint = if (showDetailsBottomSheet) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        IconButton(onClick = { showRightSetupPanel = true }) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = stringResource(R.string.common_settings),
+                                tint = if (showRightSetupPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
@@ -1933,6 +1203,34 @@ fun ChatScreen(
                 )
             }
         }
+
+        RightSystemSetupPanel(
+            visible = showRightSetupPanel,
+            userEmail = userEmail,
+            userName = userName,
+            userPicture = userPicture,
+            hasProjectOpen = currentWorkspace != null,
+            onDismiss = { showRightSetupPanel = false },
+            onOpenAccountOrSignIn = {
+                showRightSetupPanel = false
+                if (userEmail != null) {
+                    settingsInitialPage = SettingsPage.MAIN
+                    showSettingsBottomSheet = true
+                } else {
+                    viewModel.startGoogleSignIn(context)
+                }
+            },
+            onOpenWorkspaceTab = { tab ->
+                showRightSetupPanel = false
+                detailsBottomSheetTab = tab
+                showDetailsBottomSheet = true
+            },
+            onOpenSettingsPage = { page ->
+                showRightSetupPanel = false
+                settingsInitialPage = page
+                showSettingsBottomSheet = true
+            }
+        )
     }
 
     if (showModelSelector) {

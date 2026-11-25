@@ -46,10 +46,11 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
@@ -68,16 +69,11 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Info
 import id.vern.antigravity.voice.LiveVoiceController
 import id.vern.antigravity.voice.LiveVoicePhase
 import id.vern.antigravity.voice.LiveVoiceUiState
 import id.vern.antigravity.voice.TtsAvailabilityStatus
 import id.vern.antigravity.voice.VoiceLanguage
-import androidx.compose.material.icons.outlined.GppMaybe
-import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.Shield
-import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -146,53 +142,7 @@ private data class MentionItem(
     val isFile: Boolean = false
 )
 
-private data class SecurityPresetItem(
-    val id: String,
-    val titleRes: Int,
-    val descRes: Int,
-    val icon: ImageVector,
-    val isDefault: Boolean = false
-)
-
-private val SecurityPresets = listOf(
-    SecurityPresetItem(
-        id = "Request Review",
-        titleRes = R.string.security_preset_request_review_title,
-        descRes = R.string.security_preset_request_review_desc,
-        icon = Icons.Outlined.Visibility
-    ),
-    SecurityPresetItem(
-        id = "Default",
-        titleRes = R.string.security_preset_default_title,
-        descRes = R.string.security_preset_default_desc,
-        icon = Icons.Outlined.Lock
-    ),
-    SecurityPresetItem(
-        id = "Auto",
-        titleRes = R.string.security_preset_auto_title,
-        descRes = R.string.security_preset_auto_desc,
-        icon = Icons.Outlined.Shield
-    ),
-    SecurityPresetItem(
-        id = "Turbo",
-        titleRes = R.string.security_preset_turbo_title,
-        descRes = R.string.security_preset_turbo_desc,
-        icon = Icons.Outlined.GppMaybe,
-        isDefault = true
-    )
-)
-
-private fun isPresetSelected(itemId: String, currentPreset: String): Boolean {
-    val norm = currentPreset.lowercase()
-    return when (itemId) {
-        "Turbo" -> norm == "turbo" || norm == "turbo mode"
-        "Auto" -> norm == "auto" || norm == "permissive"
-        "Default" -> norm == "default" || norm == "standard"
-        "Request Review" -> norm == "request review" || norm == "request_review"
-        else -> itemId.equals(currentPreset, ignoreCase = true)
-    }
-}
-
+@Suppress("UNUSED_PARAMETER")
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ChatInputBar(
@@ -241,23 +191,6 @@ fun ChatInputBar(
     var isQueuedExpanded by remember { mutableStateOf(true) }
     var isTaskRunningExpanded by remember { mutableStateOf(true) }
     var isSubagentRunningExpanded by remember { mutableStateOf(true) }
-    var showSecurityMenu by remember { mutableStateOf(false) }
-
-    val currentPresetDisplayLabel = when {
-        securityPreset.startsWith("Turbo", ignoreCase = true) -> stringResource(R.string.security_preset_turbo_title)
-        securityPreset.equals("Auto", ignoreCase = true) || securityPreset.equals("Permissive", ignoreCase = true) -> stringResource(R.string.security_preset_auto_title)
-        securityPreset.equals("Default", ignoreCase = true) || securityPreset.equals("Standard", ignoreCase = true) -> stringResource(R.string.security_preset_default_title)
-        securityPreset.equals("Request Review", ignoreCase = true) -> stringResource(R.string.security_preset_request_review_title)
-        else -> securityPreset
-    }
-
-    val currentPresetIcon = when {
-        securityPreset.startsWith("Turbo", ignoreCase = true) -> Icons.Outlined.GppMaybe
-        securityPreset.equals("Auto", ignoreCase = true) || securityPreset.equals("Permissive", ignoreCase = true) -> Icons.Outlined.Shield
-        securityPreset.equals("Default", ignoreCase = true) || securityPreset.equals("Standard", ignoreCase = true) -> Icons.Outlined.Lock
-        securityPreset.equals("Request Review", ignoreCase = true) -> Icons.Outlined.Visibility
-        else -> Icons.Outlined.GppMaybe
-    }
 
     LaunchedEffect(externalInputText) {
         if (!externalInputText.isNullOrBlank()) {
@@ -1176,7 +1109,7 @@ fun ChatInputBar(
             }
 
             Surface(
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(22.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1187,7 +1120,7 @@ fun ChatInputBar(
 
                                 val strokeWidth = 1.35.dp.toPx()
                                 val halfStroke = strokeWidth / 2f
-                                val cornerRadius = 20.dp.toPx()
+                                val cornerRadius = 22.dp.toPx()
 
                                 val sweepShader = android.graphics.SweepGradient(
                                     size.width / 2f,
@@ -1215,7 +1148,11 @@ fun ChatInputBar(
                                 }
                             }
                         } else {
-                            Modifier
+                            Modifier.border(
+                                width = 1.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                                shape = RoundedCornerShape(22.dp)
+                            )
                         }
                     ),
                 tonalElevation = 2.dp
@@ -1223,7 +1160,7 @@ fun ChatInputBar(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 8.dp)
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
             ) {
 
                 AnimatedVisibility(visible = attachedFiles.isNotEmpty()) {
@@ -1276,7 +1213,7 @@ fun ChatInputBar(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 28.dp, max = 120.dp),
+                        .heightIn(min = 32.dp, max = 120.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {
                     if (inputText.isEmpty()) {
@@ -1284,7 +1221,7 @@ fun ChatInputBar(
                             text = stringResource(R.string.chat_input_placeholder),
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
-                                fontSize = 12.5.sp
+                                fontSize = 14.sp
                             ),
                             modifier = Modifier.padding(start = 2.dp)
                         )
@@ -1297,7 +1234,7 @@ fun ChatInputBar(
                         },
                         textStyle = TextStyle(
                             color = MaterialTheme.colorScheme.onSurface,
-                            fontSize = 12.5.sp,
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.Normal
                         ),
                         cursorBrush = SolidColor(AntigravityBlue),
@@ -1319,7 +1256,7 @@ fun ChatInputBar(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1329,7 +1266,7 @@ fun ChatInputBar(
                     val canAddMoreAttachments = attachedFiles.size < 5
                     Box(
                         modifier = Modifier
-                            .requiredSize(32.dp)
+                            .requiredSize(34.dp)
                             .clip(CircleShape)
                             .clickable(enabled = canAddMoreAttachments) { onAttachFileClick() },
                         contentAlignment = Alignment.Center
@@ -1342,7 +1279,7 @@ fun ChatInputBar(
                         )
                     }
 
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
 
                     val pillText = when {
                         selectedModel.isBlank() -> stringResource(R.string.chat_model_select)
@@ -1351,33 +1288,40 @@ fun ChatInputBar(
                     }
 
                     Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        shape = RoundedCornerShape(18.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
                         modifier = Modifier
-                            .widthIn(max = 135.dp)
-                            .clip(RoundedCornerShape(14.dp))
+                            .widthIn(max = 185.dp)
+                            .clip(RoundedCornerShape(18.dp))
                             .clickable { onModelSelectorClick() }
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                         ) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                modifier = Modifier.size(15.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = pillText,
-                                style = MaterialTheme.typography.labelSmall.copy(
+                                style = MaterialTheme.typography.labelMedium.copy(
                                     fontWeight = FontWeight.Medium,
-                                    fontSize = 11.sp
+                                    fontSize = 12.5.sp
                                 ),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f, fill = false)
                             )
-                            Spacer(modifier = Modifier.width(2.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
                             Icon(
-                                imageVector = Icons.Default.KeyboardArrowUp,
+                                imageVector = Icons.Default.KeyboardArrowDown,
                                 contentDescription = stringResource(R.string.chat_model_select),
-                                modifier = Modifier.size(14.dp),
+                                modifier = Modifier.size(16.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -1385,159 +1329,18 @@ fun ChatInputBar(
 
                     Spacer(modifier = Modifier.weight(1f))
 
-                    Box {
-                        Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                            modifier = Modifier
-                                .widthIn(max = 105.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .clickable { showSecurityMenu = !showSecurityMenu }
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = currentPresetIcon,
-                                    contentDescription = stringResource(R.string.chat_security_preset),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = currentPresetDisplayLabel,
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        fontWeight = FontWeight.Medium,
-                                        fontSize = 11.sp
-                                    ),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(modifier = Modifier.width(2.dp))
-                                Icon(
-                                    imageVector = Icons.Default.KeyboardArrowDown,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                            }
-                        }
-
-                        MaterialTheme(
-                            shapes = MaterialTheme.shapes.copy(extraSmall = RoundedCornerShape(14.dp))
-                        ) {
-                            DropdownMenu(
-                                expanded = showSecurityMenu,
-                                onDismissRequest = { showSecurityMenu = false },
-                                modifier = Modifier
-                                    .width(295.dp)
-                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                                    .border(
-                                        width = 1.dp,
-                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
-                                        shape = RoundedCornerShape(14.dp)
-                                    )
-                            ) {
-                                Text(
-                                    text = stringResource(R.string.security_preset_local_permissions),
-                                    style = MaterialTheme.typography.labelMedium.copy(
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 12.sp
-                                    ),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 6.dp)
-                                )
-                                SecurityPresets.forEach { item ->
-                                    val isSelected = isPresetSelected(item.id, securityPreset)
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                onSecurityPresetChange(item.id)
-                                                showSecurityMenu = false
-                                            }
-                                            .padding(horizontal = 14.dp, vertical = 8.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = item.icon,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Text(
-                                                    text = stringResource(item.titleRes),
-                                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                                        fontWeight = FontWeight.Medium,
-                                                        fontSize = 13.sp
-                                                    ),
-                                                    color = MaterialTheme.colorScheme.onSurface
-                                                )
-                                                if (item.isDefault) {
-                                                    Spacer(modifier = Modifier.width(6.dp))
-                                                    Surface(
-                                                        shape = RoundedCornerShape(8.dp),
-                                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f)
-                                                    ) {
-                                                        Row(
-                                                            verticalAlignment = Alignment.CenterVertically,
-                                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
-                                                        ) {
-                                                            Text(
-                                                                text = stringResource(R.string.security_preset_badge_default),
-                                                                style = MaterialTheme.typography.labelSmall.copy(
-                                                                    fontSize = 9.5.sp,
-                                                                    fontWeight = FontWeight.Normal
-                                                                ),
-                                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                            )
-                                                            Spacer(modifier = Modifier.width(2.dp))
-                                                            Icon(
-                                                                imageVector = Icons.Default.Info,
-                                                                contentDescription = null,
-                                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                                modifier = Modifier.size(10.dp)
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            Spacer(modifier = Modifier.height(2.dp))
-                                            Text(
-                                                text = stringResource(item.descRes),
-                                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                                                lineHeight = 14.sp
-                                            )
-                                        }
-                                        if (isSelected) {
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.onSurface,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(4.dp))
                     Box(
                         modifier = Modifier
-                            .requiredSize(32.dp)
+                            .requiredSize(36.dp)
                             .clip(CircleShape)
                             .background(
-                                if (liveVoiceState.active) AntigravityBlue.copy(alpha = 0.18f)
-                                else Color.Transparent
+                                if (liveVoiceState.active) AntigravityBlue.copy(alpha = 0.28f)
+                                else AntigravityBlue.copy(alpha = 0.16f)
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = AntigravityBlue.copy(alpha = if (liveVoiceState.active) 0.55f else 0.25f),
+                                shape = CircleShape
                             )
                             .clickable { onToggleLiveVoice() },
                         contentAlignment = Alignment.Center
@@ -1545,15 +1348,15 @@ fun ChatInputBar(
                         Icon(
                             imageVector = Icons.Default.GraphicEq,
                             contentDescription = stringResource(R.string.chat_live_voice_btn),
-                            tint = if (liveVoiceState.active) AntigravityBlue else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
+                            tint = AntigravityBlue,
+                            modifier = Modifier.size(19.dp)
                         )
                     }
 
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Box(
                         modifier = Modifier
-                            .requiredSize(32.dp)
+                            .requiredSize(34.dp)
                             .clip(CircleShape)
                             .clickable {
                                 if (onVoiceInputClick != null) {
@@ -1582,18 +1385,18 @@ fun ChatInputBar(
                             imageVector = Icons.Default.Mic,
                             contentDescription = stringResource(R.string.chat_voice_input),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(19.dp)
                         )
                     }
 
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
 
                     val hasInput = inputText.isNotBlank() || attachedFiles.isNotEmpty()
                     if (isExecuting && !hasInput) {
 
                         Box(
                             modifier = Modifier
-                                .requiredSize(32.dp)
+                                .requiredSize(36.dp)
                                 .clip(CircleShape)
                                 .background(AntigravityRed.copy(alpha = 0.2f))
                                 .clickable { onStopExecution() },
@@ -1603,7 +1406,7 @@ fun ChatInputBar(
                                 imageVector = Icons.Default.Stop,
                                 contentDescription = stringResource(R.string.chat_btn_stop),
                                 tint = AntigravityRed,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(17.dp)
                             )
                         }
                     } else {
@@ -1611,11 +1414,11 @@ fun ChatInputBar(
                         val canSend = hasInput
                         Box(
                             modifier = Modifier
-                                .requiredSize(32.dp)
+                                .requiredSize(36.dp)
                                 .clip(CircleShape)
                                 .background(
                                     if (canSend) AntigravityBlue
-                                    else MaterialTheme.colorScheme.surfaceVariant
+                                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
                                 )
                                 .clickable(enabled = canSend) {
                                     val text = inputText
@@ -1625,10 +1428,10 @@ fun ChatInputBar(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                imageVector = Icons.Default.ArrowUpward,
                                 contentDescription = stringResource(R.string.chat_btn_send),
-                                tint = if (canSend) Color.White else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                                modifier = Modifier.size(16.dp)
+                                tint = if (canSend) Color.White else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
