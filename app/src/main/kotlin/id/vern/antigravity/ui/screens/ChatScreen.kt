@@ -207,6 +207,7 @@ fun ChatScreen(
     val voiceSpeechRate by viewModel.voiceSpeechRate.collectAsStateWithLifecycle()
     val voiceOnlyMode by viewModel.voiceOnlyMode.collectAsStateWithLifecycle()
     val latestVoiceTurnResult by viewModel.latestVoiceTurnResult.collectAsStateWithLifecycle()
+    val pendingInteraction by viewModel.pendingInteraction.collectAsStateWithLifecycle()
 
     var showMenuDropdown by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
@@ -1280,6 +1281,67 @@ fun ChatScreen(
             authError = authError,
             onDismissRequest = { viewModel.dismissGoogleSignInDialog() },
             onLaunchSignIn = { viewModel.startGoogleSignIn(context) }
+        )
+    }
+
+    pendingInteraction?.let { prompt ->
+        AlertDialog(
+            onDismissRequest = { viewModel.resolvePendingInteraction(null) },
+            shape = RoundedCornerShape(16.dp),
+            title = {
+                DialogBlurEffect()
+                Text(
+                    text = prompt.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 360.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (prompt.detail.isNotBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = prompt.detail,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                    }
+                    prompt.options.forEach { opt ->
+                        val isReject = opt.kind.contains("reject", ignoreCase = true) ||
+                            opt.optionId.contains("reject", ignoreCase = true)
+                        OutlinedButton(
+                            onClick = { viewModel.resolvePendingInteraction(opt.optionId) },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = opt.label,
+                                color = if (isReject) AntigravityRed else AntigravityBlue,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { viewModel.resolvePendingInteraction(null) }) {
+                    Text(stringResource(R.string.common_cancel))
+                }
+            }
         )
     }
 

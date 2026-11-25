@@ -19,9 +19,9 @@ data class SlashRefreshResult(
 )
 
 object CliSlashCommandDelegate {
-    private const val KEY_CLI_SLASH_COMMANDS = "ag_cli_slash_commands"
-    private const val KEY_CLI_SLASH_VERSION = "ag_cli_slash_version"
-    private const val KEY_CLI_SLASH_FETCHED_AT = "ag_cli_slash_fetched_at"
+    private const val KEY_CLI_SLASH_COMMANDS = "ag_cli_slash_commands_v2"
+    private const val KEY_CLI_SLASH_VERSION = "ag_cli_slash_version_v2"
+    private const val KEY_CLI_SLASH_FETCHED_AT = "ag_cli_slash_fetched_at_v2"
 
     suspend fun refreshSlashActions(
         context: Context,
@@ -41,8 +41,13 @@ object CliSlashCommandDelegate {
                 ?.second?.lines()?.firstOrNull { it.isNotBlank() }?.trim()
 
             if (version != null && (version != cachedVersion || cached.isEmpty())) {
-                val help = runAgyCapture(context, workspacePath, listOf("--help"), 15_000L)
-                val parsed = help?.second?.let { SlashCommandParser.parse(it) } ?: emptyList()
+                val helpJson = runAgyCapture(
+                    context,
+                    workspacePath,
+                    listOf("--output-format", "json", "-p", "/help"),
+                    15_000L
+                )
+                val parsed = helpJson?.second?.let { SlashCommandParser.parseHelpJson(it) } ?: emptyList()
                 if (parsed.isNotEmpty()) {
                     saveCachedSlashCommands(prefs, parsed, version)
                     cliCommands = parsed

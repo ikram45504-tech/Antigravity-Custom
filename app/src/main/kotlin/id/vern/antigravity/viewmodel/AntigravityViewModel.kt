@@ -407,6 +407,15 @@ class AntigravityViewModel : ViewModel() {
     private val mutableDaemonTasks = MutableStateFlow<List<DaemonTask>>(emptyList())
     val daemonTasks: StateFlow<List<DaemonTask>> = mutableDaemonTasks.asStateFlow()
 
+    private val mutablePendingInteraction = MutableStateFlow<id.vern.antigravity.data.PendingInteractionPrompt?>(null)
+    val pendingInteraction: StateFlow<id.vern.antigravity.data.PendingInteractionPrompt?> = mutablePendingInteraction.asStateFlow()
+
+    fun resolvePendingInteraction(optionId: String?) {
+        val current = mutablePendingInteraction.value
+        mutablePendingInteraction.value = null
+        current?.onSelect?.invoke(optionId)
+    }
+
     private val mutableExecutionLogs = MutableStateFlow<List<ExecutionLogEntry>>(emptyList())
     val executionLogs: StateFlow<List<ExecutionLogEntry>> = mutableExecutionLogs.asStateFlow()
 
@@ -1844,6 +1853,101 @@ class AntigravityViewModel : ViewModel() {
         }
     }
 
+    private fun daemonTaskFiles(context: Context): List<File> = listOf(
+        File(context.filesDir, "home/.gemini/antigravity-app/daemon/tasks.json"),
+        File(context.filesDir, ".gemini/antigravity-app/daemon/tasks.json")
+    )
+
+    private fun readDaemonTasksJsonArray(context: Context): org.json.JSONArray {
+        val existing = daemonTaskFiles(context).firstOrNull { it.exists() && it.isFile }
+        if (existing != null) {
+            try {
+                val raw = existing.readText().trim()
+                if (raw.startsWith("[")) return org.json.JSONArray(raw)
+            } catch (_: Exception) {}
+        }
+        return org.json.JSONArray()
+    }
+
+    private fun writeDaemonTasksJsonArray(context: Context, array: org.json.JSONArray) {
+        val formatted = array.toString(2)
+        for (target in daemonTaskFiles(context)) {
+            try {
+                target.parentFile?.mkdirs()
+                target.writeText(formatted, Charsets.UTF_8)
+                target.setReadable(true, false)
+                target.setWritable(true, false)
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun toggleDaemonTask(context: Context, taskId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val arr = readDaemonTasksJsonArray(context)
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                if (obj.optString("id") == taskId) {
+                    obj.put("enabled", !obj.optBoolean("enabled", true))
+                    break
+                }
+            }
+            writeDaemonTasksJsonArray(context, arr)
+            loadDaemonTasks(context)
+        }
+    }
+
+    fun deleteDaemonTask(context: Context, taskId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val arr = readDaemonTasksJsonArray(context)
+            val next = org.json.JSONArray()
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                if (obj.optString("id") != taskId) next.put(obj)
+            }
+            writeDaemonTasksJsonArray(context, next)
+            loadDaemonTasks(context)
+        }
+    }
+
+    fun addDaemonTask(
+        context: Context,
+        name: String,
+        payload: String,
+        isAiPrompt: Boolean,
+        triggerType: String,
+        intervalSec: Int = 3600,
+        cron: String = ""
+    ) {
+        val cleanName = name.trim()
+        val cleanPayload = payload.trim()
+        if (cleanName.isEmpty() || cleanPayload.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val arr = readDaemonTasksJsonArray(context)
+            val obj = org.json.JSONObject().apply {
+                put("id", "task_${System.currentTimeMillis()}")
+                put("name", cleanName)
+                if (isAiPrompt) {
+                    put("prompt", cleanPayload)
+                } else {
+                    put("command", cleanPayload)
+                }
+                put("trigger_type", triggerType)
+                if (triggerType == "cron" && cron.isNotBlank()) {
+                    put("cron", cron.trim())
+                } else {
+                    put("interval", intervalSec.coerceAtLeast(10))
+                }
+                val ws = workspacePath.value
+                if (ws.isNotBlank()) put("project", ws)
+                put("enabled", true)
+                put("last_status", "idle")
+            }
+            arr.put(obj)
+            writeDaemonTasksJsonArray(context, arr)
+            loadDaemonTasks(context)
+        }
+    }
+
     fun removeQueuedMessage(id: String, convId: String? = activeConversationId.value) {
         val targetConvId = convId ?: return
         queuedMessagesByConv.update { map ->
@@ -1973,6 +2077,11 @@ class AntigravityViewModel : ViewModel() {
                 }
                 saveConversationHistory(context)
             }
+            return
+        }
+
+        if (content.trim().equals("/model", ignoreCase = true)) {
+            showModelSelector()
             return
         }
 
@@ -2262,6 +2371,9 @@ class AntigravityViewModel : ViewModel() {
                 override fun workspacePath(): String? = workspacePath.value
                 override fun selectedModelCliId(): String? = selectedModelCliId.value
                 override fun securityPreset(): String = securityPreset.value
+                override fun thinkingBudget(): String = thinkingBudget.value
+                override fun skipPermissions(): Boolean = skipPermissions.value
+                override fun enableTerminalSandbox(): Boolean = permissionState.value.enableTerminalSandbox
                 override fun getCliSessionId(convId: String): String? = convIdToCliSessionId[convId]
                 override fun setCliSessionId(convId: String, cliSessionId: String) {
                     convIdToCliSessionId[convId] = cliSessionId
@@ -2303,6 +2415,29 @@ class AntigravityViewModel : ViewModel() {
                 }
                 override fun parseTranscriptTurn(context: Context, cliConvId: String?): ParsedTranscriptTurn =
                     this@AntigravityViewModel.parseTranscriptTurn(context, cliConvId)
+                override suspend fun requestUserInteraction(
+                    title: String,
+                    detail: String,
+                    options: List<id.vern.antigravity.data.InteractionOption>
+                ): String? {
+                    val deferred = kotlinx.coroutines.CompletableDeferred<String?>()
+                    mutablePendingInteraction.value = id.vern.antigravity.data.PendingInteractionPrompt(
+                        id = UUID.randomUUID().toString(),
+                        title = title,
+                        detail = detail,
+                        options = options,
+                        onSelect = { chosen ->
+                            if (!deferred.isCompleted) deferred.complete(chosen)
+                        }
+                    )
+                    return try {
+                        deferred.await()
+                    } finally {
+                        if (mutablePendingInteraction.value?.onSelect != null && deferred.isCompleted) {
+                            mutablePendingInteraction.value = null
+                        }
+                    }
+                }
                 override fun onModelLimitReached(prompt: String, reason: String) {
                     val modelName = selectedModel.value.ifBlank { "Current model" }
                     val (_, resetSubtext) = id.vern.antigravity.ui.components.getModelQuotaPercentage(

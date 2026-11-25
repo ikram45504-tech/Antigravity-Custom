@@ -222,3 +222,17 @@ enum class ThemePreset(
     CUSTOM("custom", "Custom", "#101010", "#CCCCCC", "#1A73E8")
 }
 
+data class InteractionOption(
+    val optionId: String,
+    val label: String,
+    val kind: String = ""
+)
+
+data class PendingInteractionPrompt(
+    val id: String,
+    val title: String,
+    val detail: String,
+    val options: List<InteractionOption>,
+    val onSelect: (String?) -> Unit
+)
+

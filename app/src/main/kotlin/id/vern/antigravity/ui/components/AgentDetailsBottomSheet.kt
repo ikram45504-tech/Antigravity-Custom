@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Difference
 import androidx.compose.material.icons.filled.Folder
@@ -196,6 +197,7 @@ fun AgentDetailsBottomSheet(
     var expandedArtifacts by remember { mutableStateOf(false) }
     var expandedSubagents by remember { mutableStateOf(false) }
     var expandedTasks by remember { mutableStateOf(false) }
+    var showAddDaemonTaskDialog by remember { mutableStateOf(false) }
 
     var showAllUploadsDialog by remember { mutableStateOf(false) }
 
@@ -827,12 +829,55 @@ fun AgentDetailsBottomSheet(
                                                 )
                                             }
                                         }
-                                        Text(
-                                            text = if (dtask.enabled) stringResource(R.string.daemon_task_status_active) else stringResource(R.string.daemon_task_status_disabled),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = if (dtask.enabled) AntigravityGreen else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                                        )
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = (if (dtask.enabled) AntigravityGreen else MaterialTheme.colorScheme.surfaceVariant).copy(alpha = 0.18f),
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .clickable { viewModel.toggleDaemonTask(context, dtask.id) }
+                                        ) {
+                                            Text(
+                                                text = if (dtask.enabled) stringResource(R.string.daemon_task_status_active) else stringResource(R.string.daemon_task_status_disabled),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = if (dtask.enabled) AntigravityGreen else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = { viewModel.deleteDaemonTask(context, dtask.id) },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Delete,
+                                                contentDescription = "Delete task",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
                                     }
+                                }
+                            }
+                            item {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { showAddDaemonTaskDialog = true }
+                                        .padding(horizontal = 24.dp, vertical = 8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = null,
+                                        tint = AntigravityBlue,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Add Scheduled Task",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = AntigravityBlue,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
                                 }
                             }
                         }
@@ -1676,6 +1721,134 @@ fun AgentDetailsBottomSheet(
                 }
             },
             confirmButton = {}
+        )
+    }
+
+    if (showAddDaemonTaskDialog) {
+        var taskName by remember { mutableStateOf("") }
+        var taskPayload by remember { mutableStateOf("") }
+        var isAiPrompt by remember { mutableStateOf(false) }
+        var useCron by remember { mutableStateOf(false) }
+        var scheduleValue by remember { mutableStateOf("3600") }
+        AlertDialog(
+            onDismissRequest = { showAddDaemonTaskDialog = false },
+            shape = RoundedCornerShape(16.dp),
+            title = { Text("New Scheduled Task", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = taskName,
+                        onValueChange = { taskName = it },
+                        label = { Text("Task name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (!isAiPrompt) AntigravityBlue.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { isAiPrompt = false }
+                        ) {
+                            Text(
+                                text = "Shell Command",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (!isAiPrompt) AntigravityBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isAiPrompt) AntigravityBlue.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { isAiPrompt = true }
+                        ) {
+                            Text(
+                                text = "AI Prompt",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (isAiPrompt) AntigravityBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = taskPayload,
+                        onValueChange = { taskPayload = it },
+                        label = { Text(if (isAiPrompt) "AI prompt" else "Shell command") },
+                        maxLines = 3,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (!useCron) AntigravityBlue.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    useCron = false
+                                    if (scheduleValue.contains(" ")) scheduleValue = "3600"
+                                }
+                        ) {
+                            Text(
+                                text = "Interval (sec)",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (!useCron) AntigravityBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (useCron) AntigravityBlue.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    useCron = true
+                                    if (scheduleValue.all { it.isDigit() }) scheduleValue = "0 9 * * *"
+                                }
+                        ) {
+                            Text(
+                                text = "Cron",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (useCron) AntigravityBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = scheduleValue,
+                        onValueChange = { scheduleValue = it },
+                        label = { Text(if (useCron) "Cron (e.g. 0 9 * * *)" else "Seconds (e.g. 3600)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = taskName.isNotBlank() && taskPayload.isNotBlank(),
+                    onClick = {
+                        viewModel.addDaemonTask(
+                            context = context,
+                            name = taskName,
+                            payload = taskPayload,
+                            isAiPrompt = isAiPrompt,
+                            triggerType = if (useCron) "cron" else "interval",
+                            intervalSec = scheduleValue.toIntOrNull() ?: 3600,
+                            cron = if (useCron) scheduleValue else ""
+                        )
+                        showAddDaemonTaskDialog = false
+                    }
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddDaemonTaskDialog = false }) { Text("Cancel") }
+            }
         )
     }
 }

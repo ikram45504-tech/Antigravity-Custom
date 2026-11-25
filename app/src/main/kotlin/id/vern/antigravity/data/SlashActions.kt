@@ -1,5 +1,7 @@
 package id.vern.antigravity.data
 
+import org.json.JSONObject
+
 data class SlashAction(
     val cmd: String,
     val descText: String? = null,
@@ -12,16 +14,19 @@ data class CliSlashCommand(
 )
 
 val SYSTEM_SLASH_COMMANDS: List<SlashAction> = listOf(
+    SlashAction("plan", "Create an implementation plan before making edits", "System"),
+    SlashAction("boost", "Deep thinking, strategic planning, and rigorous verification", "System"),
+    SlashAction("grill-me", "Interactive interview to align on plan and design decisions", "System"),
+    SlashAction("teamwork", "Coordinate autonomous subagents working together in parallel", "System"),
+    SlashAction("swarm", "Run a multi-agent swarm collaborating on a shared message board", "System"),
     SlashAction("goal", "Run long-running task until completion", "System"),
     SlashAction("schedule", "Schedule a one-shot timer or recurring background task", "System"),
     SlashAction("browser", "Web browsing, searching, or interacting with web applications", "System"),
-    SlashAction("grill-me", "Interactive interview to align on plan and design decisions", "System"),
-    SlashAction("teamwork-preview", "Coordinate autonomous subagents working together in parallel", "System"),
     SlashAction("learn", "Persist current guidelines, corrections, or setup for future tasks", "System"),
-    SlashAction("deep-plan", "Deep thinking, strategic planning, and rigorous verification", "System"),
-    SlashAction("code-review", "Deep review of local changes, branch, or specific files", "System"),
+    SlashAction("compact", "Summarize conversation history to free context window", "System"),
+    SlashAction("btw", "Ask a quick side question without altering main context", "System"),
     SlashAction("clear", "Clear chat conversation history", "System"),
-    SlashAction("help", "Show help and guidance", "System"),
+    SlashAction("help", "Show available commands and guidance", "System"),
 )
 
 object SlashCommandParser {
@@ -29,6 +34,54 @@ object SlashCommandParser {
     private val slashLineRegex = Regex("""^/([A-Za-z][A-Za-z0-9_-]*)\b\s*(.*)$""")
     private val subcommandRegex = Regex("""^\s{2,}([a-z][a-z0-9_-]*)\s{2,}(.*)$""")
     private val leadingSepRegex = Regex("""^[,;:–—\-]+\s*""")
+
+    fun parseHelpJson(text: String): List<CliSlashCommand> {
+        val seen = LinkedHashMap<String, String>()
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return emptyList()
+
+        // Find JSON object line emitted by `agy --output-format json -p /help`
+        val jsonLine = trimmed.lines().firstOrNull { line ->
+            val t = line.trim()
+            t.startsWith("{") && t.endsWith("}")
+        } ?: trimmed.takeIf { it.startsWith("{") && it.endsWith("}") }
+
+        if (jsonLine != null) {
+            try {
+                val root = JSONObject(jsonLine)
+                val cmdObj = root.optJSONObject("command")
+                val dataObj = cmdObj?.optJSONObject("data")
+                val cmdsArr = dataObj?.optJSONArray("commands")
+                if (cmdsArr != null) {
+                    for (i in 0 until cmdsArr.length()) {
+                        val entry = cmdsArr.optJSONObject(i) ?: continue
+                        val name = entry.optString("name", "").trim().lowercase().trimStart('/')
+                        val desc = entry.optString("description", "").trim()
+                        if (name.isNotEmpty() && !seen.containsKey(name)) {
+                            seen[name] = desc
+                        }
+                    }
+                }
+                if (seen.isEmpty()) {
+                    val responseText = root.optString("response", "")
+                    for (line in responseText.lines()) {
+                        val t = line.trim()
+                        if (!t.startsWith("/")) continue
+                        val tabIdx = t.indexOf('\t')
+                        if (tabIdx > 1) {
+                            val namePart = t.substring(1, tabIdx).substringBefore(" ").trim().lowercase()
+                            val descPart = t.substring(tabIdx + 1).trim()
+                            if (namePart.isNotEmpty() && !seen.containsKey(namePart)) {
+                                seen[namePart] = descPart
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        return seen.map { (cmd, desc) -> CliSlashCommand(cmd, desc) }
+    }
 
     fun parse(text: String): List<CliSlashCommand> {
         val clean = ansiRegex.replace(text, "")

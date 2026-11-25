@@ -8,6 +8,7 @@ import id.vern.antigravity.data.AgentStepKind
 import id.vern.antigravity.data.AttachedFile
 import id.vern.antigravity.data.ChangedFileDetail
 import id.vern.antigravity.data.ChatMessage
+import id.vern.antigravity.data.InteractionOption
 import id.vern.antigravity.data.MessageRole
 import id.vern.antigravity.data.MessageStatus
 import id.vern.antigravity.data.RunningSubagent
@@ -64,12 +65,177 @@ class TurnExecutionDelegate {
                 lower.contains("model capacity exhausted") ||
                 lower.contains("out of quota")
         }
+
+        internal fun formatCommandResultMarkdown(commandObj: JSONObject?, fallbackResponse: String?): String? {
+            if (commandObj == null) return null
+            val name = commandObj.optString("name", "").trim()
+            val data = commandObj.optJSONObject("data")
+            if (name.isEmpty()) return null
+
+            return buildString {
+                when (name.lowercase()) {
+                    "help" -> {
+                        appendLine("### Available CLI Commands")
+                        val cmds = data?.optJSONArray("commands")
+                        if (cmds != null && cmds.length() > 0) {
+                            for (i in 0 until cmds.length()) {
+                                val c = cmds.optJSONObject(i) ?: continue
+                                val cName = c.optString("name", "").trim()
+                                val cDesc = c.optString("description", "").trim()
+                                val aliasesArr = c.optJSONArray("aliases")
+                                val aliases = if (aliasesArr != null && aliasesArr.length() > 0) {
+                                    (0 until aliasesArr.length()).mapNotNull { idx ->
+                                        aliasesArr.optString(idx, "").takeIf { it.isNotBlank() }?.let { "/$it" }
+                                    }.joinToString(", ")
+                                } else ""
+                                val aliasSuffix = if (aliases.isNotEmpty()) " ($aliases)" else ""
+                                if (cName.isNotEmpty()) {
+                                    appendLine("- `/$cName`$aliasSuffix — $cDesc")
+                                }
+                            }
+                        } else if (!fallbackResponse.isNullOrBlank()) {
+                            append(fallbackResponse.replace("\t", " — "))
+                        }
+                    }
+                    "usage", "quota" -> {
+                        appendLine("### Model Quota Usage")
+                        val desc = data?.optString("description", "")?.trim().orEmpty()
+                        val groups = data?.optJSONArray("groups")
+                        if (groups != null && groups.length() > 0) {
+                            for (i in 0 until groups.length()) {
+                                val g = groups.optJSONObject(i) ?: continue
+                                val gName = g.optString("name", "").trim()
+                                val gDesc = g.optString("description", "").trim()
+                                if (gName.isNotEmpty()) {
+                                    appendLine()
+                                    appendLine("**$gName**")
+                                    if (gDesc.isNotEmpty()) appendLine(gDesc)
+                                }
+                                val buckets = g.optJSONArray("buckets")
+                                if (buckets != null) {
+                                    for (j in 0 until buckets.length()) {
+                                        val b = buckets.optJSONObject(j) ?: continue
+                                        val bName = b.optString("name", "").trim()
+                                        val frac = b.optDouble("remaining_fraction", -1.0)
+                                        val pctStr = if (frac >= 0.0) "${(frac * 100.0).toInt()}%" else ""
+                                        val bDesc = b.optString("description", "").trim()
+                                        appendLine("- **$bName**: `$pctStr` — $bDesc")
+                                    }
+                                }
+                            }
+                        } else if (!fallbackResponse.isNullOrBlank()) {
+                            append(fallbackResponse.replace("\t", " — "))
+                        }
+                        if (desc.isNotEmpty()) {
+                            appendLine()
+                            appendLine("> $desc")
+                        }
+                    }
+                    "skills" -> {
+                        appendLine("### Available Skills")
+                        val skills = data?.optJSONArray("skills")
+                        if (skills != null && skills.length() > 0) {
+                            for (i in 0 until skills.length()) {
+                                val s = skills.optJSONObject(i) ?: continue
+                                val sName = s.optString("name", "").trim()
+                                val sDesc = s.optString("description", "").trim()
+                                val builtin = if (s.optBoolean("builtin", false)) " *(built-in)*" else ""
+                                if (sName.isNotEmpty()) {
+                                    appendLine("- `/$sName`$builtin — $sDesc")
+                                }
+                            }
+                        } else {
+                            appendLine("No skills available.")
+                        }
+                    }
+                    "permissions" -> {
+                        appendLine("### Tool Permissions")
+                        val perms = data?.optJSONArray("permissions")
+                        if (perms != null && perms.length() > 0) {
+                            var anyRule = false
+                            for (i in 0 until perms.length()) {
+                                val p = perms.optJSONObject(i) ?: continue
+                                val scope = p.optString("scope", "global")
+                                for (mode in listOf("allow", "ask", "deny")) {
+                                    val arr = p.optJSONArray(mode) ?: continue
+                                    if (arr.length() > 0) {
+                                        anyRule = true
+                                        appendLine("- **$scope ($mode)**: " + (0 until arr.length()).joinToString(", ") { "`${arr.optString(it)}`" })
+                                    }
+                                }
+                            }
+                            if (!anyRule) appendLine("No explicit rules configured.")
+                        } else if (!fallbackResponse.isNullOrBlank()) {
+                            append(fallbackResponse.replace("\t", " — "))
+                        }
+                    }
+                    "hooks" -> {
+                        appendLine("### Configured Hooks")
+                        val hooks = data?.optJSONArray("hooks")
+                        if (hooks != null && hooks.length() > 0) {
+                            for (i in 0 until hooks.length()) {
+                                val h = hooks.optJSONObject(i)
+                                if (h != null) {
+                                    appendLine("- `${h.optString("event", "hook")}`: ${h.optString("command", h.toString())}")
+                                }
+                            }
+                        } else {
+                            appendLine("No hooks configured.")
+                        }
+                    }
+                    "agents" -> {
+                        appendLine("### Available Agents")
+                        val agents = data?.optJSONArray("agents")
+                        if (agents != null && agents.length() > 0) {
+                            for (i in 0 until agents.length()) {
+                                val a = agents.optJSONObject(i) ?: continue
+                                appendLine("- **${a.optString("name", "agent")}** — ${a.optString("description", "")}")
+                            }
+                        } else {
+                            appendLine("No custom agents configured.")
+                        }
+                    }
+                    "config" -> {
+                        appendLine("### Engine Configuration")
+                        val cfg = data?.optJSONObject("config")
+                        if (cfg != null) {
+                            val keys = cfg.keys()
+                            val sortedKeys = mutableListOf<String>()
+                            while (keys.hasNext()) sortedKeys.add(keys.next())
+                            sortedKeys.sort()
+                            for (k in sortedKeys) {
+                                if (k == "userSettings") continue
+                                val v = cfg.opt(k)
+                                if (v != null && v != JSONObject.NULL && v.toString().isNotBlank()) {
+                                    appendLine("- **$k**: `$v`")
+                                }
+                            }
+                        } else if (!fallbackResponse.isNullOrBlank()) {
+                            append(fallbackResponse.replace("\t", " — "))
+                        }
+                    }
+                    else -> {
+                        appendLine("### /$name")
+                        if (!fallbackResponse.isNullOrBlank()) {
+                            append(fallbackResponse.trim().replace("\t", " — "))
+                        } else if (data != null) {
+                            appendLine("```json")
+                            appendLine(data.toString(2))
+                            appendLine("```")
+                        }
+                    }
+                }
+            }.trim()
+        }
     }
 
     interface Callbacks {
         fun workspacePath(): String?
         fun selectedModelCliId(): String?
         fun securityPreset(): String
+        fun thinkingBudget(): String = ""
+        fun skipPermissions(): Boolean = true
+        fun enableTerminalSandbox(): Boolean = false
         fun getCliSessionId(convId: String): String?
         fun setCliSessionId(convId: String, cliSessionId: String)
         fun getMessages(convId: String): List<ChatMessage>
@@ -83,6 +249,11 @@ class TurnExecutionDelegate {
         fun addRunningSubagent(subagent: RunningSubagent)
         fun updateSubagentConversationId(stableStepId: String, detectedSubConvId: String)
         fun parseTranscriptTurn(context: Context, cliConvId: String?): ParsedTranscriptTurn
+        suspend fun requestUserInteraction(
+            title: String,
+            detail: String,
+            options: List<InteractionOption>
+        ): String? = null
         fun onModelLimitReached(prompt: String, reason: String) {}
     }
 
@@ -202,12 +373,43 @@ class TurnExecutionDelegate {
         val authUrlRegex = "(https://accounts\\.google\\.com/o/oauth2/auth\\S+)".toRegex()
         var toolDetectedPlanPath: String? = null
         var toolRequestedFeedback = false
+        var commandResultObj: JSONObject? = null
 
         var currentTurn = 0
         val maxAutoTurns = 8
         var autoContinue = true
         var exitCode = 0
         var authRequired = false
+
+        val trimmedPrompt = prompt.trimStart()
+        val isInteractiveSlash = trimmedPrompt.startsWith("/grill-me", ignoreCase = true) ||
+            trimmedPrompt.startsWith("/automation", ignoreCase = true) ||
+            prompt.contains(" /grill-me", ignoreCase = true)
+        val isReadOnlyCliCmd = listOf(
+            "/help", "/usage", "/quota", "/skills", "/permissions", "/hooks",
+            "/agents", "/config", "/settings", "/credits", "/changelog", "/effort", "/model", "/plugin"
+        ).any { trimmedPrompt.equals(it, ignoreCase = true) || trimmedPrompt.startsWith("$it ", ignoreCase = true) }
+
+        val shouldTryAcp = !ephemeralVoiceOnly && !isReadOnlyCliCmd && (!callbacks.skipPermissions() || isInteractiveSlash)
+        if (shouldTryAcp) {
+            val acpResult = tryRunAcpTurn(
+                context = context,
+                prompt = prompt,
+                convId = convId,
+                assistantMsgId = assistantMsgId,
+                stagedAttachments = stagedAttachments,
+                callbacks = effectiveCallbacks,
+                validWsDir = validWsDir,
+                priorCliSession = priorCliSession,
+                voiceInstruction = voiceInstruction,
+                outputSb = outputSb
+            )
+            if (acpResult != null) {
+                activeCliConvId = acpResult.first ?: activeCliConvId
+                exitCode = acpResult.second
+                autoContinue = false
+            }
+        }
 
         while (autoContinue && currentTurn < maxAutoTurns && coroutineContext.isActive) {
             currentTurn++
@@ -216,6 +418,9 @@ class TurnExecutionDelegate {
             val args = buildCliArgs(
                 cliId = cliId,
                 securityPreset = callbacks.securityPreset(),
+                thinkingBudget = callbacks.thinkingBudget(),
+                skipPermissions = callbacks.skipPermissions(),
+                enableTerminalSandbox = callbacks.enableTerminalSandbox(),
                 validWsDir = validWsDir,
                 sessionToResume = activeCliConvId ?: priorCliSession,
                 currentTurn = currentTurn,
@@ -359,9 +564,15 @@ class TurnExecutionDelegate {
                                     }
                                 }
                             }
+                            "command_result" -> {
+                                commandResultObj = json.optJSONObject("command") ?: commandResultObj
+                            }
                             "result" -> {
                                 val resultObj = json.optJSONObject("result")
-                                val finalResponse = resultObj?.optString("response")
+                                val cmdObj = resultObj?.optJSONObject("command") ?: commandResultObj
+                                val rawResponse = resultObj?.optString("response")
+                                val formattedCommand = formatCommandResultMarkdown(cmdObj, rawResponse)
+                                val finalResponse = formattedCommand ?: rawResponse
                                 if (!finalResponse.isNullOrBlank()) {
                                     TerminalSessionManager.appendAgyLine(finalResponse)
                                     outputSb.clear()
@@ -615,6 +826,9 @@ class TurnExecutionDelegate {
     private fun buildCliArgs(
         cliId: String,
         securityPreset: String,
+        thinkingBudget: String,
+        skipPermissions: Boolean,
+        enableTerminalSandbox: Boolean,
         validWsDir: File?,
         sessionToResume: String?,
         currentTurn: Int,
@@ -624,16 +838,32 @@ class TurnExecutionDelegate {
     ): List<String> {
         val args = mutableListOf<String>()
         val currentSec = securityPreset.lowercase()
-        args.add("--dangerously-skip-permissions")
-        if (currentSec == "request review" || currentSec == "request_review") {
-            args.add("--mode")
-            args.add("plan")
+        val isAutoOrTurbo = currentSec == "turbo" || currentSec == "turbo mode" || currentSec == "auto" || currentSec == "permissive"
+        if (skipPermissions && isAutoOrTurbo) {
+            args.add("--dangerously-skip-permissions")
+        }
+        val mode = when (currentSec) {
+            "request review", "request_review" -> "plan"
+            "default", "standard" -> "accept-edits"
+            else -> "auto"
+        }
+        args.add("--mode")
+        args.add(mode)
+        if (enableTerminalSandbox) {
+            args.add("--sandbox")
         }
         args.add("--output-format")
         args.add("stream-json")
         if (cliId.isNotBlank()) {
             args.add("--model")
             args.add(cliId)
+        }
+        val effortArg = thinkingBudget.trim().lowercase()
+        if (effortArg in setOf("low", "medium", "high", "xhigh", "max") &&
+            AgyModelsService.effortSuffixOf(cliId) == null
+        ) {
+            args.add("--effort")
+            args.add(effortArg)
         }
         if (validWsDir != null) {
             args.add("--add-dir")
@@ -649,9 +879,15 @@ class TurnExecutionDelegate {
         } else {
             ""
         }
+        val basePrompt = if (currentTurn == 1) expandMentionsContext(context, prompt, validWsDir) else prompt
         val currentPrompt = if (currentTurn == 1 && stagedAttachments.isNotEmpty()) {
             buildString {
-                if (voicePrefix.isNotEmpty()) append(voicePrefix)
+                if (basePrompt.trimStart().startsWith("/")) {
+                    append(basePrompt)
+                    append("\n\n")
+                } else if (voicePrefix.isNotEmpty()) {
+                    append(voicePrefix)
+                }
                 append("### USER ATTACHMENTS\n")
                 append("The user has attached the following ${stagedAttachments.size} file(s):\n")
                 stagedAttachments.forEachIndexed { idx, (name, path, mime) ->
@@ -664,17 +900,336 @@ class TurnExecutionDelegate {
                         append("   Action: Call the `view_file` tool with AbsolutePath=\"$path\" to inspect this file.\n")
                     }
                 }
-                append("MANDATORY: You must inspect the attached file(s) with the `view_file` tool before answering.\n\n")
-                append("### USER REQUEST\n")
-                append(if (prompt.isNotBlank()) prompt else "Please inspect the attached file(s) and assist the user.")
+                append("MANDATORY: You must inspect the attached file(s) with the `view_file` tool before answering.\n")
+                if (!basePrompt.trimStart().startsWith("/")) {
+                    append("\n### USER REQUEST\n")
+                    append(if (basePrompt.isNotBlank()) basePrompt else "Please inspect the attached file(s) and assist the user.")
+                }
             }
         } else if (currentTurn == 1) {
-            if (voicePrefix.isNotEmpty()) "$voicePrefix$prompt" else prompt
+            if (voicePrefix.isNotEmpty()) "$voicePrefix$basePrompt" else basePrompt
         } else {
             "Continue and complete the task based on previous tool results. Provide thorough analysis or confirmation once finished."
         }
         args.add(currentPrompt)
         return args
+    }
+
+    private fun expandMentionsContext(
+        context: Context,
+        prompt: String,
+        validWsDir: File?
+    ): String {
+        if (!prompt.contains("@")) return prompt
+        val mentionRegex = Regex("""(?:^|\s)@(workspace|terminal|git)(?=\s|$|[.,;:!?])""", RegexOption.IGNORE_CASE)
+        val found = mentionRegex.findAll(prompt).map { it.groupValues[1].lowercase() }.toSet()
+        if (found.isEmpty()) return prompt
+
+        val extraSections = mutableListOf<String>()
+
+        if ("workspace" in found && validWsDir != null && validWsDir.isDirectory) {
+            val entries = validWsDir.listFiles()
+                ?.filter { !it.name.startsWith(".") }
+                ?.sortedBy { it.name.lowercase() }
+                ?.take(40)
+                ?.joinToString(", ") { if (it.isDirectory) "${it.name}/" else it.name }
+                .orEmpty()
+            extraSections.add("[Workspace Context: ${validWsDir.absolutePath}]\nTop-level entries: $entries")
+        }
+
+        if ("terminal" in found) {
+            val recentLines = TerminalSessionManager.lines.toList()
+                .takeLast(40)
+                .joinToString("\n") { it.text }
+                .trim()
+            if (recentLines.isNotEmpty()) {
+                extraSections.add("[Terminal Context (${TerminalSessionManager.currentSessionName.value})]\n```\n$recentLines\n```")
+            }
+        }
+
+        if ("git" in found && validWsDir != null && File(validWsDir, ".git").exists()) {
+            val gitSb = StringBuilder()
+            try {
+                val proc = ProcessBuilder("git", "status", "-sb")
+                    .directory(validWsDir)
+                    .redirectErrorStream(true)
+                    .start()
+                val statusText = proc.inputStream.bufferedReader().readText().trim()
+                proc.waitFor()
+                if (statusText.isNotEmpty()) gitSb.appendLine(statusText)
+                val diffProc = ProcessBuilder("git", "diff", "--stat")
+                    .directory(validWsDir)
+                    .redirectErrorStream(true)
+                    .start()
+                val diffStat = diffProc.inputStream.bufferedReader().readText().trim()
+                diffProc.waitFor()
+                if (diffStat.isNotEmpty()) gitSb.appendLine(diffStat)
+            } catch (_: Exception) {}
+            if (gitSb.isNotEmpty()) {
+                extraSections.add("[Git Context]\n```\n${gitSb.toString().trim()}\n```")
+            }
+        }
+
+        if (extraSections.isEmpty()) return prompt
+        return "$prompt\n\n<attached_context>\n${extraSections.joinToString("\n\n")}\n</attached_context>"
+    }
+
+    private suspend fun tryRunAcpTurn(
+        context: Context,
+        prompt: String,
+        convId: String,
+        assistantMsgId: String,
+        stagedAttachments: List<Triple<String, String, String>>,
+        callbacks: Callbacks,
+        validWsDir: File?,
+        priorCliSession: String?,
+        voiceInstruction: String?,
+        outputSb: StringBuilder
+    ): Pair<String?, Int>? = withContext(Dispatchers.IO) {
+        val acpArgs = mutableListOf<String>()
+        if (validWsDir != null) {
+            acpArgs.add("--add-dir")
+            acpArgs.add(validWsDir.absolutePath)
+        }
+        if (callbacks.enableTerminalSandbox()) {
+            acpArgs.add("--sandbox")
+        }
+        val process = EngineExecutor.startAcpProcess(context, acpArgs, validWsDir) ?: return@withContext null
+        var sessionStarted = false
+        var resolvedSessionId: String? = priorCliSession
+        var exitCode = 0
+        val thoughtSb = StringBuilder()
+
+        try {
+            val writer = process.outputStream.bufferedWriter(Charsets.UTF_8)
+            val reader = process.inputStream.bufferedReader(Charsets.UTF_8)
+
+            fun sendRpc(obj: JSONObject) {
+                writer.write(obj.toString())
+                writer.newLine()
+                writer.flush()
+            }
+
+            // 1. initialize
+            sendRpc(JSONObject().apply {
+                put("jsonrpc", "2.0")
+                put("id", 1)
+                put("method", "initialize")
+                put("params", JSONObject().apply { put("protocolVersion", 1) })
+            })
+
+            var initOk = false
+            while (coroutineContext.isActive) {
+                val line = reader.readLine() ?: break
+                val t = line.trim()
+                if (!t.startsWith("{")) continue
+                val msg = runCatching { JSONObject(t) }.getOrNull() ?: continue
+                if (msg.optInt("id", -1) == 1) {
+                    initOk = msg.has("result")
+                    break
+                }
+            }
+            if (!initOk) {
+                process.destroyForcibly()
+                return@withContext null
+            }
+
+            // 2. session/load or session/new
+            val cwdStr = validWsDir?.absolutePath ?: context.filesDir.absolutePath
+            val sessionMethod = if (!priorCliSession.isNullOrBlank()) "session/load" else "session/new"
+            sendRpc(JSONObject().apply {
+                put("jsonrpc", "2.0")
+                put("id", 2)
+                put("method", sessionMethod)
+                put("params", JSONObject().apply {
+                    if (!priorCliSession.isNullOrBlank()) put("sessionId", priorCliSession)
+                    put("cwd", cwdStr)
+                    put("mcpServers", org.json.JSONArray())
+                })
+            })
+
+            while (coroutineContext.isActive) {
+                val line = reader.readLine() ?: break
+                val t = line.trim()
+                if (!t.startsWith("{")) continue
+                val msg = runCatching { JSONObject(t) }.getOrNull() ?: continue
+                if (msg.optInt("id", -1) == 2) {
+                    val res = msg.optJSONObject("result")
+                    val sid = res?.optString("sessionId")?.takeIf { it.isNotBlank() } ?: priorCliSession
+                    if (!sid.isNullOrBlank()) {
+                        resolvedSessionId = sid
+                        callbacks.setCliSessionId(convId, sid)
+                        callbacks.addLog("Agent", "ACP session linked: $sid")
+                    }
+                    break
+                }
+            }
+
+            val sid = resolvedSessionId
+            if (sid.isNullOrBlank()) {
+                process.destroyForcibly()
+                return@withContext null
+            }
+
+            // 3. session/prompt
+            val basePrompt = expandMentionsContext(context, prompt, validWsDir)
+            val fullText = if (stagedAttachments.isNotEmpty()) {
+                buildString {
+                    append(basePrompt)
+                    append("\n\nAttached files:\n")
+                    stagedAttachments.forEach { (n, p, _) -> append("- $n: $p\n") }
+                }
+            } else if (!voiceInstruction.isNullOrBlank() && !basePrompt.trimStart().startsWith("/")) {
+                "${voiceInstruction.trim()}\n\n$basePrompt"
+            } else {
+                basePrompt
+            }
+
+            sessionStarted = true
+            sendRpc(JSONObject().apply {
+                put("jsonrpc", "2.0")
+                put("id", 3)
+                put("method", "session/prompt")
+                put("params", JSONObject().apply {
+                    put("sessionId", sid)
+                    put("prompt", org.json.JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("type", "text")
+                            put("text", fullText)
+                        })
+                    })
+                })
+            })
+
+            var lastUiMs = 0L
+            while (coroutineContext.isActive) {
+                val line = reader.readLine() ?: break
+                val t = line.trim()
+                if (!t.startsWith("{")) continue
+                val msg = runCatching { JSONObject(t) }.getOrNull() ?: continue
+                val method = msg.optString("method", "")
+                val idVal = if (msg.has("id") && !msg.isNull("id")) msg.opt("id") else null
+
+                if (idVal != null && (msg.optInt("id", -1) == 3) && method.isEmpty()) {
+                    if (msg.has("error")) exitCode = 1
+                    break
+                }
+
+                when (method) {
+                    "session/update" -> {
+                        val update = msg.optJSONObject("params")?.optJSONObject("update") ?: continue
+                        when (update.optString("sessionUpdate")) {
+                            "agent_thought_chunk" -> {
+                                val txt = update.optJSONObject("content")?.optString("text", "").orEmpty()
+                                if (txt.isNotEmpty()) {
+                                    thoughtSb.append(txt)
+                                    val now = System.currentTimeMillis()
+                                    if (now - lastUiMs > 250L) {
+                                        lastUiMs = now
+                                        val curThought = thoughtSb.toString()
+                                        callbacks.updateMessages(convId) { list ->
+                                            list.map { m -> if (m.id == assistantMsgId) m.copy(thinking = curThought) else m }
+                                        }
+                                    }
+                                }
+                            }
+                            "agent_message_chunk" -> {
+                                val txt = update.optJSONObject("content")?.optString("text", "").orEmpty()
+                                if (txt.isNotEmpty()) {
+                                    outputSb.append(txt)
+                                    val now = System.currentTimeMillis()
+                                    if (now - lastUiMs > 200L) {
+                                        lastUiMs = now
+                                        val curOut = outputSb.toString()
+                                        callbacks.updateMessages(convId) { list ->
+                                            list.map { m -> if (m.id == assistantMsgId) m.copy(content = curOut) else m }
+                                        }
+                                    }
+                                }
+                            }
+                            "tool_call", "tool_call_update" -> {
+                                val callId = update.optString("toolCallId", UUID.randomUUID().toString())
+                                val title = update.optString("title", "Tool")
+                                val status = update.optString("status", "")
+                                val step = AgentExecutionStep(
+                                    id = "acp_$callId",
+                                    kind = AgentStepKind.ANALYZED,
+                                    title = title,
+                                    detail = status,
+                                    isCompleted = status == "completed" || status == "failed"
+                                )
+                                callbacks.updateMessages(convId) { list ->
+                                    list.map { m ->
+                                        if (m.id == assistantMsgId) {
+                                            val idx = m.steps.indexOfFirst { it.id == step.id }
+                                            val nextSteps = if (idx >= 0) {
+                                                m.steps.toMutableList().apply { set(idx, step) }
+                                            } else {
+                                                m.steps + step
+                                            }
+                                            m.copy(steps = nextSteps)
+                                        } else m
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "session/request_permission" -> {
+                        val params = msg.optJSONObject("params") ?: JSONObject()
+                        val toolCall = params.optJSONObject("toolCall")
+                        val title = toolCall?.optString("title")?.takeIf { it.isNotBlank() } ?: "Agent Request"
+                        val rawInput = toolCall?.opt("rawInput")?.toString()?.take(600).orEmpty()
+                        val optsArr = params.optJSONArray("options")
+                        val opts = mutableListOf<InteractionOption>()
+                        if (optsArr != null) {
+                            for (i in 0 until optsArr.length()) {
+                                val o = optsArr.optJSONObject(i) ?: continue
+                                val oid = o.optString("optionId", "").trim()
+                                val oName = o.optString("name", oid).trim()
+                                val oKind = o.optString("kind", "").trim()
+                                if (oid.isNotEmpty()) opts.add(InteractionOption(oid, oName, oKind))
+                            }
+                        }
+                        if (opts.isEmpty()) {
+                            opts.add(InteractionOption("allow_once", "Allow Once", "allow_once"))
+                            opts.add(InteractionOption("reject_once", "Reject", "reject_once"))
+                        }
+                        val chosen = callbacks.requestUserInteraction(title, rawInput, opts)
+                        val outcomeObj = if (!chosen.isNullOrBlank()) {
+                            JSONObject().apply {
+                                put("outcome", "selected")
+                                put("optionId", chosen)
+                            }
+                        } else {
+                            JSONObject().apply { put("outcome", "cancelled") }
+                        }
+                        sendRpc(JSONObject().apply {
+                            put("jsonrpc", "2.0")
+                            put("id", idVal)
+                            put("result", JSONObject().apply { put("outcome", outcomeObj) })
+                        })
+                    }
+                }
+            }
+
+            if (outputSb.isNotEmpty()) {
+                val finalOut = outputSb.toString()
+                val finalThought = thoughtSb.toString().takeIf { it.isNotBlank() }
+                callbacks.updateMessages(convId) { list ->
+                    list.map { m ->
+                        if (m.id == assistantMsgId) {
+                            m.copy(content = finalOut, thinking = finalThought ?: m.thinking)
+                        } else m
+                    }
+                }
+            }
+            resolvedSessionId to exitCode
+        } catch (e: Exception) {
+            callbacks.addLog("Agent", "ACP session fallback: ${e.message}")
+            if (sessionStarted) (resolvedSessionId to 1) else null
+        } finally {
+            runCatching { process.destroyForcibly() }
+        }
     }
 
     private fun parseToolStep(

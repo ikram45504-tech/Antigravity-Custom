@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import id.vern.antigravity.R
 import id.vern.antigravity.ui.theme.AntigravityBlue
+import id.vern.antigravity.ui.theme.AntigravityGreen
 
 sealed class MarkdownElement {
     data class Heading(val level: Int, val text: String) : MarkdownElement()
@@ -72,7 +73,7 @@ private val BULLET_REGEX = Regex("""^[-*+]\s+(.*)$""")
 private val NUM_REGEX = Regex("""^(\d+)\.\s+(.*)$""")
 private val BULLET_PREFIX_REGEX = Regex("""^[-*+]\s+""")
 private val NUM_PREFIX_REGEX = Regex("""^\d+\.\s+""")
-private val INLINE_TOKEN_REGEX = Regex("""(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))""")
+private val INLINE_TOKEN_REGEX = Regex("""(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\)|(?:^|\s)/[A-Za-z][A-Za-z0-9_-]*(?=\s|$|[.,;:!?])|(?:^|\s)@[A-Za-z0-9_./-]+(?=\s|$|[.,;:!?]))""")
 
 private const val ASYNC_MARKDOWN_THRESHOLD = 2000
 private const val MAX_CACHEABLE_MARKDOWN_LENGTH = 65536
@@ -253,6 +254,43 @@ fun parseInlineMarkdown(
                         length
                     )
                     addStringAnnotation(tag = "URL", annotation = url, start = start, end = length)
+                }
+                token.trimStart().startsWith("/") -> {
+                    val leadingWsLen = token.length - token.trimStart().length
+                    if (leadingWsLen > 0) {
+                        append(token.substring(0, leadingWsLen))
+                    }
+                    val cmdToken = token.substring(leadingWsLen)
+                    val start = length
+                    append(cmdToken)
+                    addStyle(
+                        SpanStyle(
+                            color = primaryColor,
+                            background = primaryColor.copy(alpha = 0.14f),
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        start,
+                        length
+                    )
+                }
+                token.trimStart().startsWith("@") -> {
+                    val leadingWsLen = token.length - token.trimStart().length
+                    if (leadingWsLen > 0) {
+                        append(token.substring(0, leadingWsLen))
+                    }
+                    val mentionToken = token.substring(leadingWsLen)
+                    val start = length
+                    append(mentionToken)
+                    addStyle(
+                        SpanStyle(
+                            color = AntigravityGreen,
+                            background = AntigravityGreen.copy(alpha = 0.14f),
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        start,
+                        length
+                    )
                 }
                 else -> {
                     append(token)

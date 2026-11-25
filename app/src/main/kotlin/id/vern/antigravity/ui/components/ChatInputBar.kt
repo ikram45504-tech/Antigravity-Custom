@@ -106,10 +106,16 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -135,6 +141,52 @@ private val AuroraColorInts = intArrayOf(
     0xFF24C6DC.toInt(),
     0xFF4285F4.toInt()
 )
+
+private val INPUT_SLASH_REGEX = Regex("""(?:^|\s)(/[A-Za-z][A-Za-z0-9_-]*)(?=\s|$)""")
+private val INPUT_MENTION_REGEX = Regex("""(?:^|\s)(@[A-Za-z0-9_./-]+)(?=\s|$)""")
+
+private class ChatPromptVisualTransformation(
+    private val slashColor: Color,
+    private val slashBackground: Color,
+    private val mentionColor: Color,
+    private val mentionBackground: Color
+) : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val raw = text.text
+        if (!raw.contains('/') && !raw.contains('@')) {
+            return TransformedText(text, OffsetMapping.Identity)
+        }
+        val styled = buildAnnotatedString {
+            append(raw)
+            for (match in INPUT_SLASH_REGEX.findAll(raw)) {
+                val group = match.groups[1] ?: continue
+                addStyle(
+                    SpanStyle(
+                        color = slashColor,
+                        background = slashBackground,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Monospace
+                    ),
+                    start = group.range.first,
+                    end = group.range.last + 1
+                )
+            }
+            for (match in INPUT_MENTION_REGEX.findAll(raw)) {
+                val group = match.groups[1] ?: continue
+                addStyle(
+                    SpanStyle(
+                        color = mentionColor,
+                        background = mentionBackground,
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    start = group.range.first,
+                    end = group.range.last + 1
+                )
+            }
+        }
+        return TransformedText(styled, OffsetMapping.Identity)
+    }
+}
 
 private data class MentionItem(
     val token: String,
@@ -272,10 +324,7 @@ fun ChatInputBar(
     val defaultMentions = listOf(
         MentionItem("workspace", R.string.chat_mention_workspace, Icons.Default.Folder),
         MentionItem("terminal", R.string.chat_mention_terminal, Icons.Default.Terminal),
-        MentionItem("git", R.string.chat_mention_git, Icons.Default.History),
-        MentionItem("problems", R.string.chat_mention_problems, Icons.Default.Warning),
-        MentionItem("docs", R.string.chat_mention_docs, Icons.Default.Description),
-        MentionItem("web", R.string.chat_mention_web, Icons.Default.Language)
+        MentionItem("git", R.string.chat_mention_git, Icons.Default.History)
     )
 
     Column(modifier = modifier) {
@@ -1228,6 +1277,15 @@ fun ChatInputBar(
                         )
                     }
 
+                    val promptVisualTransformation = remember(AntigravityBlue, AntigravityGreen) {
+                        ChatPromptVisualTransformation(
+                            slashColor = AntigravityBlue,
+                            slashBackground = AntigravityBlue.copy(alpha = 0.14f),
+                            mentionColor = AntigravityGreen,
+                            mentionBackground = AntigravityGreen.copy(alpha = 0.14f)
+                        )
+                    }
+
                     BasicTextField(
                         value = inputText,
                         onValueChange = { newText ->
@@ -1238,6 +1296,7 @@ fun ChatInputBar(
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Normal
                         ),
+                        visualTransformation = promptVisualTransformation,
                         cursorBrush = SolidColor(AntigravityBlue),
                         singleLine = false,
                         maxLines = 5,

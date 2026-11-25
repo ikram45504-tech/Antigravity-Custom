@@ -258,6 +258,9 @@ class SettingsPreferencesDelegate {
         mutableVerboseThinking.value = verbose
         val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putBoolean(AntigravityViewModel.KEY_VERBOSE_THINKING, verbose).apply()
+        val updated = mutablePermissionState.value.copy(verboseThinking = verbose)
+        mutablePermissionState.value = updated
+        PermissionConfigService.syncSettingsJsonFiles(context, updated)
     }
 
     fun setConversationWidth(context: Context, width: String) {
@@ -376,6 +379,9 @@ class SettingsPreferencesDelegate {
         mutableQueuedMessagesMode.value = mode
         val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putString(AntigravityViewModel.KEY_QUEUED_MESSAGES_MODE, mode).apply()
+        val updated = mutablePermissionState.value.copy(queuedMessagesMode = mode)
+        mutablePermissionState.value = updated
+        PermissionConfigService.syncSettingsJsonFiles(context, updated)
         onLog("General", "Queued messages delivery set to: $mode")
     }
 
@@ -459,6 +465,9 @@ class SettingsPreferencesDelegate {
         mutableEnableCreditOverages.value = enabled
         val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putBoolean(AntigravityViewModel.KEY_ENABLE_CREDIT_OVERAGES, enabled).apply()
+        val updated = mutablePermissionState.value.copy(enableCreditOverages = enabled)
+        mutablePermissionState.value = updated
+        PermissionConfigService.syncSettingsJsonFiles(context, updated)
         onLog("Models", "AI credit overages set to: $enabled")
     }
 

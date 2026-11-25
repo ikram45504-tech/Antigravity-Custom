@@ -98,6 +98,8 @@ class CustomizationCatalogueDelegate {
 
     fun getBuiltinSkillsDir(context: Context): File {
         val candidates = listOf(
+            File(context.filesDir, "home/.gemini/antigravity-cli/builtin/skills"),
+            File(context.filesDir, ".gemini/antigravity-cli/builtin/skills"),
             File(context.filesDir, ".gemini/antigravity-app/builtin/skills"),
             File(context.filesDir, "usr/share/antigravity/builtin/skills"),
             File(context.filesDir, "home/.gemini/antigravity-app/builtin/skills")
@@ -161,7 +163,8 @@ class CustomizationCatalogueDelegate {
         val configDirsToCheck = listOf(
             File(configDir, "skills"),
             File(context.filesDir, ".gemini/config/skills"),
-            File(context.filesDir, "home/.gemini/config/skills")
+            File(context.filesDir, "home/.gemini/config/skills"),
+            File(context.filesDir, "home/.agents/skills")
         )
 
         for (skillsDir in configDirsToCheck) {
@@ -204,7 +207,9 @@ class CustomizationCatalogueDelegate {
         val pluginBaseDirs = listOf(
             File(configDir, "plugins"),
             File(context.filesDir, ".gemini/config/plugins"),
-            File(context.filesDir, "home/.gemini/config/plugins")
+            File(context.filesDir, "home/.gemini/config/plugins"),
+            File(context.filesDir, "home/.agents/plugins"),
+            File(context.filesDir, "home/.gemini/antigravity-cli/builtin/plugins")
         )
         for (pBase in pluginBaseDirs) {
             if (pBase.isDirectory) {
@@ -234,7 +239,11 @@ class CustomizationCatalogueDelegate {
         if (!workspacePath.isNullOrBlank()) {
             val wsDir = File(workspacePath)
             if (wsDir.isDirectory) {
-                val wsSkillsDirs = listOf(File(wsDir, ".gemini/skills"), File(wsDir, "skills"))
+                val wsSkillsDirs = listOf(
+                    File(wsDir, ".agents/skills"),
+                    File(wsDir, ".gemini/skills"),
+                    File(wsDir, "skills")
+                )
                 for (wSkills in wsSkillsDirs) {
                     if (wSkills.isDirectory) {
                         wSkills.listFiles()?.filter { it.isDirectory }?.forEach { dir ->
@@ -272,6 +281,34 @@ class CustomizationCatalogueDelegate {
                     }
                     seen.add(nameLower)
                     list.add(CustomizationItem(dir.name, dir.name, desc, "skill", true, dir.absolutePath))
+                }
+            }
+        }
+
+        val builtinPluginDirs = listOf(
+            File(context.filesDir, "home/.gemini/antigravity-cli/builtin/plugins"),
+            File(context.filesDir, ".gemini/antigravity-cli/builtin/plugins")
+        )
+        for (bpBase in builtinPluginDirs) {
+            if (!bpBase.isDirectory) continue
+            bpBase.listFiles()?.filter { it.isDirectory }?.forEach { pDir ->
+                val pSkillsDir = File(pDir, "skills")
+                if (pSkillsDir.isDirectory) {
+                    pSkillsDir.listFiles()?.filter { it.isDirectory }?.forEach { sDir ->
+                        val sNameLower = sDir.name.lowercase()
+                        if (!seen.contains(sNameLower)) {
+                            val skillFile = File(sDir, "SKILL.md")
+                            var desc = "Built-in plugin skill (${pDir.name})"
+                            if (skillFile.exists()) {
+                                val descLine = skillFile.readLines().take(20).firstOrNull { it.trim().startsWith("description:") }
+                                if (descLine != null) {
+                                    desc = descLine.substringAfter("description:").trim().trim('"', '\'')
+                                }
+                            }
+                            seen.add(sNameLower)
+                            list.add(CustomizationItem(sDir.name, sDir.name, desc, "skill", true, sDir.absolutePath))
+                        }
+                    }
                 }
             }
         }
@@ -348,7 +385,9 @@ class CustomizationCatalogueDelegate {
         val pluginBaseDirs = listOf(
             File(configDir, "plugins"),
             File(context.filesDir, ".gemini/config/plugins"),
-            File(context.filesDir, "home/.gemini/config/plugins")
+            File(context.filesDir, "home/.gemini/config/plugins"),
+            File(context.filesDir, "home/.agents/plugins"),
+            File(context.filesDir, "home/.gemini/antigravity-cli/builtin/plugins")
         )
 
         for (pBase in pluginBaseDirs) {

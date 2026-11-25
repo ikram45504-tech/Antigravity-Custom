@@ -118,7 +118,25 @@ def run_task_worker(task):
     log(f"Worker started for task [{name}] (ID: {task_id})")
 
     if not command and prompt:
-        command = f"agy-notify post -t 'AI Task Trigger' -m {shlex.quote(prompt[:100])}"
+        files_dir = os.path.dirname(os.path.normpath(PREFIX))
+        engine_dir = os.path.join(files_dir, "engine")
+        ld_bin = os.path.join(engine_dir, "glibc", "lib", "ld-linux-aarch64.so.1")
+        agy_bin = os.path.join(engine_dir, "bin", "agy")
+        glibc_lib = os.path.join(engine_dir, "glibc", "lib")
+        usr_lib = os.path.join(PREFIX, "lib")
+        agy_args = ["--dangerously-skip-permissions", "--output-format", "text"]
+        if project and os.path.isdir(project):
+            agy_args.extend(["--add-dir", project])
+        if convo_id:
+            agy_args.extend(["--conversation", convo_id])
+        agy_args.extend(["--print", prompt])
+        if os.path.isfile(ld_bin) and os.path.isfile(agy_bin):
+            lib_path = f"{glibc_lib}:{usr_lib}"
+            quoted = " ".join(shlex.quote(p) for p in [ld_bin, "--library-path", lib_path, agy_bin] + agy_args)
+            command = quoted
+        else:
+            quoted = " ".join(shlex.quote(p) for p in ["agy"] + agy_args)
+            command = quoted
 
     notify("Antigravity Daemon", f"Running task: {name}", tag=f"task_{task_id}")
 

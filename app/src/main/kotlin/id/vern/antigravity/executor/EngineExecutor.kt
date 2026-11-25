@@ -562,6 +562,87 @@ object EngineExecutor {
         -1
     }
 
+    fun startAcpProcess(
+        context: Context,
+        args: List<String>,
+        workingDir: File? = null
+    ): Process? {
+        val filesDir = context.filesDir
+        val prefixDir = File(filesDir, "usr")
+        val engineDir = File(filesDir, "engine")
+        val agyBin = listOf(
+            File(engineDir, "bin/agy"),
+            File(filesDir, "tmp/engine/bin/agy"),
+            File(filesDir, "runtime/bin/agy")
+        ).firstOrNull { it.exists() && it.isFile } ?: File(engineDir, "bin/agy")
+        val ldBin = listOf(
+            File(engineDir, "glibc/lib/ld-linux-aarch64.so.1"),
+            File(filesDir, "runtime/lib/ld-linux-aarch64.so.1"),
+            File(filesDir, "tmp/engine/glibc/lib/ld-linux-aarch64.so.1")
+        ).firstOrNull { it.exists() && it.isFile } ?: File(engineDir, "glibc/lib/ld-linux-aarch64.so.1")
+        val libDir = listOf(
+            File(engineDir, "glibc/lib"),
+            File(filesDir, "runtime/lib"),
+            File(filesDir, "tmp/engine/glibc/lib")
+        ).firstOrNull { it.exists() && it.isDirectory } ?: File(engineDir, "glibc/lib")
+        if (!ldBin.exists() || !agyBin.exists()) return null
+
+        val prefixLib = File(prefixDir, "lib")
+        val homeDir = File(filesDir, "home").apply { mkdirs() }
+        val tmpDir = File(filesDir, "tmp").apply { mkdirs() }
+        val certFile = File(prefixDir, "etc/tls/cert.pem")
+        val targetCwd = if (workingDir != null && workingDir.exists() && workingDir.isDirectory) workingDir else homeDir
+
+        try {
+            BootstrapInstaller.ensurePermissions(context)
+            OAuthManager.checkAndImportExistingToken(context)
+            OAuthManager.syncCompanionStateFiles(context)
+            id.vern.antigravity.service.PermissionConfigService.syncSettingsJsonFiles(context)
+        } catch (_: Exception) {}
+
+        val projectEnv = LinkedHashMap<String, String>().apply {
+            putAll(GitHubAuthManager.buildGitEnvForProject(context, targetCwd))
+            putAll(ProjectIntegrationsManager.buildRuntimeEnv(context, targetCwd))
+        }
+        val libraryPaths = listOf(libDir.absolutePath, prefixLib.absolutePath)
+            .filter { File(it).exists() }
+            .joinToString(":")
+        val cmdList = mutableListOf(
+            ldBin.absolutePath,
+            "--library-path",
+            libraryPaths,
+            agyBin.absolutePath,
+            "acp"
+        ).apply { addAll(args) }
+
+        val pb = ProcessBuilder(cmdList)
+        pb.directory(targetCwd)
+        val gitExecDir = File(prefixDir, "libexec/git-core")
+        val validGitExec = if (gitExecDir.exists() && gitExecDir.isDirectory) gitExecDir else null
+        val validGitTemplate = File(prefixDir, "share/git-core/templates").apply { mkdirs() }
+        val extraGitPath = if (validGitExec != null) ":${validGitExec.absolutePath}" else ""
+        val agyPath = "${File(prefixDir, "bin").absolutePath}:${File(engineDir, "bin").absolutePath}$extraGitPath:/system/bin"
+
+        buildBaseProcessEnv(
+            env = pb.environment(),
+            context = context,
+            filesDir = filesDir,
+            prefixDir = prefixDir,
+            homeDir = homeDir,
+            tmpDir = tmpDir,
+            targetCwd = targetCwd,
+            pathEnv = agyPath,
+            ldLibraryPath = "${prefixLib.absolutePath}:/system/lib64",
+            validGitExec = validGitExec,
+            validGitTemplate = validGitTemplate,
+            certFile = certFile,
+            goDebug = "netdns=cgo",
+            requireCertExists = true,
+            envOverrides = projectEnv
+        )
+        return runCatching { pb.start() }.getOrNull()
+    }
+
     private val activeAgyProcesses = ConcurrentHashMap<String, Process>()
 
     fun isAgyRunning(executionKey: String? = null): Boolean {

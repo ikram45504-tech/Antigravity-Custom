@@ -20,7 +20,10 @@ data class PermissionGrantsState(
     val enableTerminalSandbox: Boolean = false,
     val nonWorkspaceFileAccessPolicy: String = "AGENT_SETTING_POLICY_ALLOW",
     val planReviewPolicy: String = "Always Proceed",
-    val securityPreset: String = "Turbo Mode"
+    val securityPreset: String = "Turbo Mode",
+    val enableCreditOverages: Boolean = false,
+    val queuedMessagesMode: String = "Queue",
+    val verboseThinking: Boolean = false
 ) {
     fun getRulesForAction(action: String): List<PermissionRule> =
         rules.filter { it.action.equals(action, ignoreCase = true) }
@@ -82,7 +85,11 @@ object PermissionConfigService {
 
     fun syncSettingsJsonFiles(context: Context, state: PermissionGrantsState = PermissionGrantsState()) {
         val allowSet = linkedSetOf<String>()
-        allowSet.addAll(DEFAULT_HEADLESS_ALLOW_GRANTS)
+        val secLower = state.securityPreset.lowercase()
+        val isAutoOrTurbo = secLower == "turbo" || secLower == "turbo mode" || secLower == "auto" || secLower == "permissive"
+        if (isAutoOrTurbo) {
+            allowSet.addAll(DEFAULT_HEADLESS_ALLOW_GRANTS)
+        }
         val askSet = linkedSetOf<String>()
         val denySet = linkedSetOf<String>()
 
@@ -107,7 +114,7 @@ object PermissionConfigService {
                 }
 
                 val existingPerms = root.optJSONObject("permissions")
-                if (existingPerms != null) {
+                if (existingPerms != null && isAutoOrTurbo) {
                     val existingAllow = existingPerms.optJSONArray("allow")
                     if (existingAllow != null) {
                         for (i in 0 until existingAllow.length()) {
@@ -122,7 +129,7 @@ object PermissionConfigService {
                 val askArr = JSONArray()
                 askSet.forEach { askArr.put(it) }
                 val denyArr = JSONArray()
-                denySet.forEach { denyArr.put(it) }
+                denyArr.forEach { denyArr.put(it) }
 
                 val permsObj = JSONObject().apply {
                     put("allow", allowArr)
@@ -131,9 +138,35 @@ object PermissionConfigService {
                 }
                 root.put("permissions", permsObj)
 
+                // Top-level keys read by `agy` v1.5.17
+                val agentMode = when (secLower) {
+                    "request review", "request_review" -> "plan"
+                    "default", "standard" -> "accept-edits"
+                    else -> "auto"
+                }
+                val toolPerm = if (isAutoOrTurbo) "always-proceed" else "request-review"
+                val artifactPolicy = if (state.planReviewPolicy.equals("Always Proceed", ignoreCase = true)) {
+                    "always-proceed"
+                } else {
+                    "asks-for-review"
+                }
+                val allowNonWorkspace = state.nonWorkspaceFileAccessPolicy.equals("AGENT_SETTING_POLICY_ALLOW", ignoreCase = true)
+
+                root.put("agentMode", agentMode)
+                root.put("toolPermission", toolPerm)
+                root.put("artifactReviewPolicy", artifactPolicy)
+                root.put("enableTerminalSandbox", state.enableTerminalSandbox)
+                root.put("allowNonWorkspaceAccess", allowNonWorkspace)
+                root.put("useG1Credits", state.enableCreditOverages)
+                root.put(
+                    "queuedMessages",
+                    if (state.queuedMessagesMode.equals("Send Immediately", ignoreCase = true)) "send-immediately" else "queue"
+                )
+                root.put("showThinking", state.verboseThinking)
+
                 val userSettings = root.optJSONObject("userSettings") ?: JSONObject().also { root.put("userSettings", it) }
                 userSettings.put("autoExecutionPolicy", state.autoExecutionPolicy)
-                userSettings.put("enableTerminalSandbox", false)
+                userSettings.put("enableTerminalSandbox", state.enableTerminalSandbox)
                 userSettings.put("nonWorkspaceFileAccessPolicy", state.nonWorkspaceFileAccessPolicy)
                 userSettings.put("planReviewPolicy", state.planReviewPolicy)
                 userSettings.put("securityPreset", state.securityPreset)
@@ -230,7 +263,10 @@ object PermissionConfigService {
             userSettings.put("securityPreset", state.securityPreset)
 
             val allowSet = linkedSetOf<String>()
-            allowSet.addAll(DEFAULT_HEADLESS_ALLOW_GRANTS)
+            val secLower = state.securityPreset.lowercase()
+            if (secLower == "turbo" || secLower == "turbo mode" || secLower == "auto" || secLower == "permissive") {
+                allowSet.addAll(DEFAULT_HEADLESS_ALLOW_GRANTS)
+            }
             val askArr = JSONArray()
             val denyArr = JSONArray()
 
