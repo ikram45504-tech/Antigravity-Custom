@@ -696,5 +696,17 @@
     <string name="settings_alert_preview_sound">Preview</string>
     <string name="settings_alert_test_button">Test Alert</string>
     <string name="settings_alert_test_toast">Testing prompt completion notification &amp; buzz…</string>
+    <string name="drawer_recent_title">Recent</string>
+    <string name="system_setup_panel_title">System &amp; Setup</string>
+    <string name="common_close">Close</string>
+    <string name="system_setup_workspace_section">Workspace &amp; Tools</string>
+    <string name="system_setup_settings_section">System Setup</string>
+    <string name="settings_general_title">General</string>
+    <string name="settings_appearance_title">Appearance &amp; Theme</string>
+    <string name="settings_models_title">Models &amp; Quota</string>
+    <string name="settings_customizations_title">Skills / Rules / MCP</string>
+    <string name="settings_github_title">GitHub Integration</string>
+    <string name="settings_cloud_title">Cloud (Vercel / Supabase / Cloudflare)</string>
+    <string name="settings_developer_title">Developer &amp; Logs</string>
 </resources>
 

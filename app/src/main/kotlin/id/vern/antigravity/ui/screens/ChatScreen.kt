@@ -677,14 +677,14 @@ fun ChatScreen(
                                 formatRelativeTime = ::formatRelativeTime,
                                 onNewConversation = { projectPath ->
                                     if (projectPath != null) {
-                                        viewModel.startNewConversationInProject(context, projectPath)
+                                        viewModel.startNewConversation(context, projectPath)
                                     } else {
                                         viewModel.startNewConversation(context)
                                     }
                                     showProjectChatsDropdown = false
                                 },
                                 onSelectProject = { project ->
-                                    viewModel.selectProject(context, project)
+                                    viewModel.setWorkspacePath(context, project.absolutePath)
                                     showProjectChatsDropdown = false
                                 },
                                 onSelectConversation = { convo ->
@@ -700,8 +700,8 @@ fun ChatScreen(
                                     showProjectChatsDropdown = false
                                 },
                                 onOpenProjectIntegrations = { project ->
-                                    viewModel.selectProject(context, project)
-                                    settingsInitialPage = SettingsPage.GITHUB
+                                    viewModel.setIntegrationTargetProject(context, project.absolutePath)
+                                    settingsInitialPage = SettingsPage.CLOUD_INTEGRATIONS
                                     showSettingsBottomSheet = true
                                     showProjectChatsDropdown = false
                                 },
