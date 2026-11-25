@@ -85,7 +85,7 @@ class TurnExecutionDelegate {
                                 val aliasesArr = c.optJSONArray("aliases")
                                 val aliases = if (aliasesArr != null && aliasesArr.length() > 0) {
                                     (0 until aliasesArr.length()).mapNotNull { idx ->
-                                        aliasesArr.optString(idx, "").takeIf { it.isNotBlank() }?.let { "/$it" }
+                                        aliasesArr.optString(idx, "").takeIf { it.isNotBlank() }?.let { "`/$it`" }
                                     }.joinToString(", ")
                                 } else ""
                                 val aliasSuffix = if (aliases.isNotEmpty()) " ($aliases)" else ""
