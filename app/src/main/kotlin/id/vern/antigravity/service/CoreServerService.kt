@@ -100,6 +100,7 @@ class CoreServerService : Service() {
         serviceScope.cancel()
         Thread {
             stopBackgroundDaemonInternal()
+            DevServerManager.stopAll()
         }.apply {
             isDaemon = true
             start()

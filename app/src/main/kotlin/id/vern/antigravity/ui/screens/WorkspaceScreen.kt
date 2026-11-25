@@ -27,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Terminal
@@ -63,6 +64,7 @@ import id.vern.antigravity.data.OpenTab
 import id.vern.antigravity.ui.components.CodeEditor
 import id.vern.antigravity.ui.components.DiffViewer
 import id.vern.antigravity.ui.components.FileTree
+import id.vern.antigravity.ui.components.LocalhostPreviewPanel
 import id.vern.antigravity.ui.components.ModelSelectorDialog
 import id.vern.antigravity.ui.components.TerminalView
 import id.vern.antigravity.viewmodel.AntigravityViewModel
@@ -73,6 +75,7 @@ enum class ActiveToolView {
     FILES,
     EDITOR,
     TERMINAL,
+    PREVIEW,
     SETTINGS
 }
 
@@ -149,6 +152,12 @@ fun WorkspaceScreen(
                         onClick = { activeView = ActiveToolView.TERMINAL },
                         icon = { Icon(imageVector = Icons.Default.Terminal, contentDescription = stringResource(R.string.nav_item_terminal)) },
                         label = { Text(stringResource(R.string.nav_item_terminal), fontSize = 10.sp) }
+                    )
+                    NavigationRailItem(
+                        selected = activeView == ActiveToolView.PREVIEW,
+                        onClick = { activeView = ActiveToolView.PREVIEW },
+                        icon = { Icon(imageVector = Icons.Default.Language, contentDescription = stringResource(R.string.nav_item_preview)) },
+                        label = { Text(stringResource(R.string.nav_item_preview), fontSize = 10.sp) }
                     )
 
                     Spacer(modifier = Modifier.weight(1f))
@@ -246,6 +255,10 @@ fun WorkspaceScreen(
                         ) { targetView ->
                             when (targetView) {
                                 ActiveToolView.TERMINAL -> TerminalView(modifier = Modifier.fillMaxSize())
+                                ActiveToolView.PREVIEW -> {
+                                    val workspacePath by viewModel.workspacePath.collectAsStateWithLifecycle()
+                                    LocalhostPreviewPanel(workspacePath = workspacePath, modifier = Modifier.fillMaxSize())
+                                }
                                 ActiveToolView.SETTINGS -> SettingsScreen(viewModel = viewModel, onNavigateBack = { activeView = ActiveToolView.CHAT })
                                 else -> ChatScreen(
                                     viewModel = viewModel,
@@ -542,6 +555,14 @@ fun WorkspaceScreen(
                                                 )
                                             }
                                         }
+
+                                        IconButton(onClick = { activeView = ActiveToolView.PREVIEW }) {
+                                            Icon(
+                                                imageVector = Icons.Default.Language,
+                                                contentDescription = stringResource(R.string.nav_item_preview),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     },
                                     colors = TopAppBarDefaults.topAppBarColors(
                                         containerColor = MaterialTheme.colorScheme.surface
@@ -557,6 +578,57 @@ fun WorkspaceScreen(
                                     .padding(innerPadding)
                             ) {
                                 TerminalView(modifier = Modifier.fillMaxSize())
+                            }
+                        }
+                    }
+
+                    ActiveToolView.PREVIEW -> {
+                        val workspacePath by viewModel.workspacePath.collectAsStateWithLifecycle()
+                        Scaffold(
+                            topBar = {
+                                TopAppBar(
+                                    navigationIcon = {
+                                        IconButton(onClick = { activeView = ActiveToolView.CHAT }) {
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                                contentDescription = stringResource(R.string.nav_back_to_chat),
+                                                tint = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+                                    },
+                                    title = {
+                                        Text(
+                                            text = stringResource(R.string.nav_item_preview),
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    },
+                                    actions = {
+                                        IconButton(onClick = { activeView = ActiveToolView.TERMINAL }) {
+                                            Icon(
+                                                imageVector = Icons.Default.Terminal,
+                                                contentDescription = stringResource(R.string.nav_item_terminal),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    },
+                                    colors = TopAppBarDefaults.topAppBarColors(
+                                        containerColor = MaterialTheme.colorScheme.surface
+                                    )
+                                )
+                            },
+                            contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
+                            modifier = Modifier.fillMaxSize()
+                        ) { innerPadding ->
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(innerPadding)
+                            ) {
+                                LocalhostPreviewPanel(
+                                    workspacePath = workspacePath,
+                                    modifier = Modifier.fillMaxSize()
+                                )
                             }
                         }
                     }

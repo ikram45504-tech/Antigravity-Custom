@@ -25,9 +25,114 @@ object EngineExecutor {
     @Volatile
     private var isGitPermissionsSet = false
 
+    private val activeCommandProcesses = ConcurrentHashMap<String, Process>()
+
     fun invalidateEnvironment() {
         isEnvironmentHealed = false
         isGitPermissionsSet = false
+    }
+
+    internal fun isSharedAndroidStoragePath(path: String): Boolean =
+        path.startsWith("/storage/emulated/") || path.startsWith("/sdcard/")
+
+    internal fun appendNodeOptionFlag(existingNodeOptions: String?, flag: String): String {
+        val existing = existingNodeOptions?.trim().orEmpty()
+        if (existing.isEmpty()) return flag
+        if (existing.contains(flag)) return existing
+        return "$existing $flag"
+    }
+
+    private fun ensureNodeNetworkShim(filesDir: File): File? {
+        return runCatching {
+            val libDir = File(filesDir, "usr/lib").apply { mkdirs() }
+            val shim = File(libDir, "node_android_shim.js")
+            val content = """
+                'use strict';
+                try {
+                  const os = require('os');
+                  const orig = os.networkInterfaces;
+                  if (typeof orig === 'function') {
+                    os.networkInterfaces = function networkInterfaces() {
+                      try {
+                        const res = orig.call(os);
+                        if (res && Object.keys(res).length > 0) return res;
+                      } catch (_) {}
+                      return {
+                        lo: [{
+                          address: '127.0.0.1',
+                          netmask: '255.0.0.0',
+                          family: 'IPv4',
+                          mac: '00:00:00:00:00:00',
+                          internal: true,
+                          cidr: '127.0.0.1/8'
+                        }]
+                      };
+                    };
+                  }
+                } catch (_) {}
+            """.trimIndent() + "\n"
+            if (!shim.exists() || shim.readText(Charsets.UTF_8) != content) {
+                shim.writeText(content, Charsets.UTF_8)
+                shim.setReadable(true, false)
+            }
+            shim
+        }.getOrNull()
+    }
+
+    private fun extractProcessPid(process: Process): Long? {
+        runCatching {
+            val m = process.javaClass.getMethod("pid")
+            (m.invoke(process) as? Number)?.toLong()?.let { return it }
+        }
+        return Regex("pid=(\\d+)").find(process.toString())?.groupValues?.getOrNull(1)?.toLongOrNull()
+    }
+
+    private fun collectDescendantPids(rootPid: Long): List<Long> {
+        val parentToChildren = HashMap<Long, MutableList<Long>>()
+        File("/proc").listFiles()?.forEach { entry ->
+            val pid = entry.name.toLongOrNull() ?: return@forEach
+            val stat = runCatching { File(entry, "stat").readText(Charsets.UTF_8) }.getOrNull() ?: return@forEach
+            val rparen = stat.lastIndexOf(')')
+            if (rparen <= 0) return@forEach
+            val fields = stat.substring(rparen + 1).trim().split(Regex("\\s+"))
+            val ppid = fields.getOrNull(1)?.toLongOrNull() ?: return@forEach
+            parentToChildren.getOrPut(ppid) { mutableListOf() }.add(pid)
+        }
+        val result = mutableListOf<Long>()
+        val queue = ArrayDeque<Long>()
+        queue.add(rootPid)
+        while (queue.isNotEmpty()) {
+            val curr = queue.removeFirst()
+            parentToChildren[curr]?.forEach { child ->
+                result.add(child)
+                queue.add(child)
+            }
+        }
+        return result.reversed()
+    }
+
+    private fun killProcessTree(process: Process) {
+        val rootPid = extractProcessPid(process)
+        if (rootPid != null) {
+            runCatching {
+                val descendants = collectDescendantPids(rootPid)
+                descendants.forEach { childPid ->
+                    try { Os.kill(childPid.toInt(), 15) } catch (_: Throwable) {}
+                }
+                Thread.sleep(120)
+                descendants.forEach { childPid ->
+                    try { Os.kill(childPid.toInt(), 9) } catch (_: Throwable) {}
+                }
+            }
+        }
+        try { process.destroy() } catch (_: Exception) {}
+        try { process.destroyForcibly() } catch (_: Exception) {}
+    }
+
+    fun stopCommandProcess(commandKey: String): Boolean {
+        val proc = activeCommandProcesses.remove(commandKey) ?: return false
+        killProcessTree(proc)
+        return true
     }
 
     private fun readGatewayToken(filesDir: File): String? {
@@ -106,6 +211,16 @@ object EngineExecutor {
         env["APPLICATION_ID"] = context.packageName
         env["ANTIGRAVITY_APP_DATA_DIR"] = File(homeDir, ".gemini/antigravity-cli").apply { mkdirs() }.absolutePath
         readGatewayToken(filesDir)?.let { env["AGY_GATEWAY_TOKEN"] = it }
+        ensureNodeNetworkShim(filesDir)?.let { shim ->
+            env["NODE_OPTIONS"] = appendNodeOptionFlag(env["NODE_OPTIONS"], "--require=${shim.absolutePath}")
+        }
+        if (!env.containsKey("HOST")) env["HOST"] = "127.0.0.1"
+        if (!env.containsKey("BROWSER")) env["BROWSER"] = "none"
+        if (isSharedAndroidStoragePath(targetCwd.absolutePath)) {
+            if (!env.containsKey("CHOKIDAR_USEPOLLING")) env["CHOKIDAR_USEPOLLING"] = "1"
+            if (!env.containsKey("CHOKIDAR_INTERVAL")) env["CHOKIDAR_INTERVAL"] = "400"
+            if (!env.containsKey("WATCHPACK_POLLING")) env["WATCHPACK_POLLING"] = "true"
+        }
         envOverrides.forEach { (k, v) -> env[k] = v }
     }
 
@@ -114,8 +229,9 @@ object EngineExecutor {
         command: String,
         workingDir: File? = null,
         envOverrides: Map<String, String> = emptyMap(),
+        commandKey: String? = null,
         onOutputLine: (String, Boolean) -> Unit
-    ): Int = executeCommandWithUpdates(context, command, workingDir, envOverrides) { line, isErr, isUpdate ->
+    ): Int = executeCommandWithUpdates(context, command, workingDir, envOverrides, commandKey) { line, isErr, isUpdate ->
         onOutputLine(line, isErr)
     }
 
@@ -124,6 +240,7 @@ object EngineExecutor {
         command: String,
         workingDir: File? = null,
         envOverrides: Map<String, String> = emptyMap(),
+        commandKey: String? = null,
         onOutput: (String, Boolean, Boolean) -> Unit
     ): Int = withContext(Dispatchers.IO) {
         healEnvironment(context)
@@ -200,6 +317,9 @@ object EngineExecutor {
             )
 
             val process = pb.start()
+            if (commandKey != null) {
+                activeCommandProcesses[commandKey] = process
+            }
 
             val stdoutThread = Thread {
                 streamOutput(process.inputStream, false, onOutput)
@@ -214,7 +334,13 @@ object EngineExecutor {
 
             val exitCode = try {
                 process.waitFor()
+            } catch (e: InterruptedException) {
+                killProcessTree(process)
+                -1
             } finally {
+                if (commandKey != null) {
+                    activeCommandProcesses.remove(commandKey, process)
+                }
                 try { process.outputStream.close() } catch (e: Exception) {}
             }
             stdoutThread.join(1000)

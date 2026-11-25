@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.Difference
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
@@ -114,6 +115,7 @@ import id.vern.antigravity.ui.theme.AntigravityBlue
 import id.vern.antigravity.ui.theme.AntigravityGreen
 import id.vern.antigravity.ui.theme.AntigravityRed
 import id.vern.antigravity.executor.EngineExecutor
+import id.vern.antigravity.service.DevServerManager
 import id.vern.antigravity.service.TerminalSessionManager
 import id.vern.antigravity.service.TerminalLine
 import id.vern.antigravity.viewmodel.AntigravityViewModel
@@ -353,6 +355,13 @@ fun AgentDetailsBottomSheet(
                                 onClick = { selectedTab = 3 }
                             )
                         }
+                        Spacer(modifier = Modifier.width(3.dp))
+                        TabPillButton(
+                            selected = selectedTab == 4,
+                            icon = Icons.Default.Language,
+                            contentDescription = stringResource(R.string.agent_tab_preview),
+                            onClick = { selectedTab = 4 }
+                        )
                     }
                 }
             }
@@ -1549,6 +1558,14 @@ fun AgentDetailsBottomSheet(
                             modifier = Modifier.fillMaxSize()
                         )
                     }
+                }
+                4 -> {
+                    val detectedUrls by DevServerManager.detectedUrls.collectAsStateWithLifecycle()
+                    LocalhostPreviewPanel(
+                        workspacePath = workspacePath.orEmpty(),
+                        initialUrl = detectedUrls.firstOrNull(),
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
             }
         }

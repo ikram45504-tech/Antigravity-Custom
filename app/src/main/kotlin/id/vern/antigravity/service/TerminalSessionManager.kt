@@ -33,8 +33,8 @@ object TerminalSessionManager {
     var currentWorkingDir: File? = null
     val sessionBuffers = mutableMapOf<String, MutableList<TerminalLine>>()
     private var initialized = false
-    private var activeJob: Job? = null
-    private val scope = CoroutineScope(Dispatchers.Main + Job())
+    private val jobsBySession = java.util.concurrent.ConcurrentHashMap<String, Job>()
+    private val scope = CoroutineScope(Dispatchers.Main + kotlinx.coroutines.SupervisorJob())
     private val mainHandler = Handler(Looper.getMainLooper())
 
     fun initIfNeeded() {
@@ -114,6 +114,9 @@ object TerminalSessionManager {
     fun appendLine(text: String, isError: Boolean, isUpdate: Boolean) {
         val clean = cleanAnsi(text)
         if (clean.isEmpty() && isUpdate) return
+        if (clean.isNotEmpty()) {
+            DevServerManager.recordDetectedUrlFromOutput(clean)
+        }
 
         mainHandler.post {
             try {
@@ -220,37 +223,56 @@ object TerminalSessionManager {
             return Job()
         }
 
+        val targetSession = currentSessionName.value
+        val commandKey = "terminal_$targetSession"
         val effectiveCwd = workingDir ?: currentWorkingDir
         lines.add(TerminalLine(text = "$ $trimmed", isCommand = true))
-        sessionBuffers[currentSessionName.value]?.add(TerminalLine(text = "$ $trimmed", isCommand = true))
+        sessionBuffers[targetSession]?.add(TerminalLine(text = "$ $trimmed", isCommand = true))
         history.add(trimmed)
         historyIndex.intValue = history.size
         commandInput.value = ""
         isRunning.value = true
 
-        activeJob?.cancel()
+        EngineExecutor.stopCommandProcess(commandKey)
+        jobsBySession.remove(targetSession)?.cancel()
         val job = scope.launch {
-            val exitCode = EngineExecutor.executeCommandWithUpdates(context, trimmed, effectiveCwd) { line, isErr, isUpdate ->
-                appendLine(line, isErr, isUpdate)
+            val exitCode = try {
+                EngineExecutor.executeCommandWithUpdates(
+                    context = context,
+                    command = trimmed,
+                    workingDir = effectiveCwd,
+                    commandKey = commandKey
+                ) { line, isErr, isUpdate ->
+                    appendLine(line, isErr, isUpdate)
+                }
+            } finally {
+                isRunning.value = jobsBySession.values.any { it.isActive }
             }
-            isRunning.value = false
+            jobsBySession.remove(targetSession)
+            isRunning.value = jobsBySession.values.any { it.isActive }
             onFinished?.invoke(exitCode)
         }
-        activeJob = job
+        jobsBySession[targetSession] = job
         return job
     }
 
     fun killCurrentProcess() {
-        if (currentSessionName.value == AGY_SESSION_NAME && EngineExecutor.isAgyRunning()) {
+        val targetSession = currentSessionName.value
+        if (targetSession == AGY_SESSION_NAME && EngineExecutor.isAgyRunning()) {
             EngineExecutor.stopAgyProcess()
             appendAgyLine("^C [AGY process stopped by user]", isError = true)
             return
         }
-        if (isRunning.value) {
-            activeJob?.cancel()
+        val commandKey = "terminal_$targetSession"
+        val killedProcess = EngineExecutor.stopCommandProcess(commandKey)
+        val cancelledJob = jobsBySession.remove(targetSession)?.let {
+            it.cancel()
+            true
+        } ?: false
+        if (killedProcess || cancelledJob || isRunning.value) {
             lines.add(TerminalLine(text = "^C [Process terminated by user]", isError = true))
-            sessionBuffers[currentSessionName.value]?.add(TerminalLine(text = "^C [Process terminated by user]", isError = true))
-            isRunning.value = false
+            sessionBuffers[targetSession]?.add(TerminalLine(text = "^C [Process terminated by user]", isError = true))
+            isRunning.value = jobsBySession.values.any { it.isActive }
         }
     }
 

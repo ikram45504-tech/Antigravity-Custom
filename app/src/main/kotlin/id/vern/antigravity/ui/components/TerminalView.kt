@@ -143,23 +143,10 @@ fun TerminalView(
             return
         }
 
-        lines.add(TerminalLine(text = "$ $trimmed", isCommand = true))
-        TerminalSessionManager.sessionBuffers[TerminalSessionManager.currentSessionName.value]?.add(TerminalLine(text = "$ $trimmed", isCommand = true))
-        history.add(trimmed)
-        historyIndex = history.size
-        commandInput = ""
-        isRunning = true
-        safeRequestFocus()
-
-        coroutineScope.launch {
-            val exitCode = EngineExecutor.executeCommandWithUpdates(context, trimmed, TerminalSessionManager.currentWorkingDir) { line, isErr, isUpdate ->
-                TerminalSessionManager.appendLine(line, isErr, isUpdate)
-            }
-            withContext(Dispatchers.Main) {
-                isRunning = false
-                safeRequestFocus()
-            }
+        TerminalSessionManager.runCommand(context, trimmed, TerminalSessionManager.currentWorkingDir) {
+            safeRequestFocus()
         }
+        safeRequestFocus()
     }
 
     Column(
