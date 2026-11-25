@@ -167,6 +167,7 @@ enum class SettingsPage {
     CUSTOMIZATIONS,
     ACCOUNT,
     GITHUB,
+    CLOUD_INTEGRATIONS,
     DEVELOPER,
     ABOUT
 }
@@ -344,6 +345,12 @@ fun SettingsBottomSheet(
                             onBack = { pageStack.removeAt(pageStack.lastIndex) }
                         )
                     }
+                    SettingsPage.CLOUD_INTEGRATIONS -> {
+                        CloudIntegrationsSettingsPage(
+                            viewModel = viewModel,
+                            onBack = { pageStack.removeAt(pageStack.lastIndex) }
+                        )
+                    }
                     SettingsPage.DEVELOPER -> {
                         DeveloperSettingsPage(
                             viewModel = viewModel,
@@ -429,6 +436,10 @@ fun MainSettingsPage(
             SettingsMenuRow(
                 title = if (githubAccount != null) "GitHub (@${githubAccount!!.login})" else "GitHub",
                 onClick = { onNavigateTo(SettingsPage.GITHUB) }
+            )
+            SettingsMenuRow(
+                title = "Cloud & Deploy (Vercel, Supabase, CF)",
+                onClick = { onNavigateTo(SettingsPage.CLOUD_INTEGRATIONS) }
             )
             SettingsMenuRow(
                 title = "Developer & System",

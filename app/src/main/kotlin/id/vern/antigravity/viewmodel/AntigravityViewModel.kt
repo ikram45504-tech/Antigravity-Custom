@@ -68,6 +68,20 @@ import id.vern.antigravity.executor.EngineExecutor
 import id.vern.antigravity.install.BootstrapInstaller
 import id.vern.antigravity.install.CoreUpdateManager
 import id.vern.antigravity.install.CoreUpdateInfo
+import id.vern.antigravity.integrations.CloudAccount
+import id.vern.antigravity.integrations.CloudCliStatus
+import id.vern.antigravity.integrations.CloudProvider
+import id.vern.antigravity.integrations.CloudVerificationResult
+import id.vern.antigravity.integrations.CloudflareAccountItem
+import id.vern.antigravity.integrations.CloudflarePagesDeploymentItem
+import id.vern.antigravity.integrations.CloudflarePagesProjectItem
+import id.vern.antigravity.integrations.ProjectIntegrationBinding
+import id.vern.antigravity.integrations.ProjectIntegrationsManager
+import id.vern.antigravity.integrations.SupabaseProjectItem
+import id.vern.antigravity.integrations.VercelDeploymentItem
+import id.vern.antigravity.integrations.VercelProjectItem
+import id.vern.antigravity.integrations.VercelTeamItem
+import id.vern.antigravity.oauth.GitHubAuthManager
 import id.vern.antigravity.oauth.OAuthManager
 import id.vern.antigravity.oauth.AccountManager
 import id.vern.antigravity.oauth.StoredAccount
@@ -229,6 +243,7 @@ class AntigravityViewModel : ViewModel() {
     private val settingsPreferencesDelegate = SettingsPreferencesDelegate()
     private val customizationInstallerDelegate = CustomizationInstallerDelegate()
     private val customizationCatalogueDelegate = CustomizationCatalogueDelegate()
+    private val integrationsDelegate = IntegrationsDelegate()
 
     private val mutableChatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val chatMessages: StateFlow<List<ChatMessage>> = mutableChatMessages.asStateFlow()
@@ -296,6 +311,31 @@ class AntigravityViewModel : ViewModel() {
 
     val projectList: StateFlow<List<File>> = projectWorkspaceDelegate.projectList
     val projectSortOrder: StateFlow<ProjectSortOrder> = projectWorkspaceDelegate.projectSortOrder
+
+    val integrationTargetProjectPath: StateFlow<String> = integrationsDelegate.targetProjectPath
+    val integrationTargetBinding: StateFlow<ProjectIntegrationBinding> = integrationsDelegate.targetBinding
+    val activeWorkspaceBinding: StateFlow<ProjectIntegrationBinding?> = integrationsDelegate.activeWorkspaceBinding
+    val allProjectBindings: StateFlow<Map<String, ProjectIntegrationBinding>> = integrationsDelegate.allProjectBindings
+    val cloudAccounts: StateFlow<List<CloudAccount>> = integrationsDelegate.cloudAccounts
+    val selectedCloudAccountIds: StateFlow<Map<CloudProvider, String?>> = integrationsDelegate.selectedAccountIds
+    val cloudVerifications: StateFlow<Map<CloudProvider, CloudVerificationResult?>> = integrationsDelegate.verifications
+    val isVerifyingCloudProvider: StateFlow<Map<CloudProvider, Boolean>> = integrationsDelegate.isVerifying
+    val isAuthenticatingCloudProvider: StateFlow<Map<CloudProvider, Boolean>> = integrationsDelegate.isAuthenticating
+    val cloudAuthErrors: StateFlow<Map<CloudProvider, String?>> = integrationsDelegate.authErrors
+    val vercelTeams: StateFlow<List<VercelTeamItem>> = integrationsDelegate.vercelTeams
+    val vercelSelectedTeamId: StateFlow<String> = integrationsDelegate.vercelSelectedTeamId
+    val vercelProjects: StateFlow<List<VercelProjectItem>> = integrationsDelegate.vercelProjects
+    val vercelDeployments: StateFlow<Map<String, List<VercelDeploymentItem>>> = integrationsDelegate.vercelDeployments
+    val supabaseProjects: StateFlow<List<SupabaseProjectItem>> = integrationsDelegate.supabaseProjects
+    val cloudflareAccounts: StateFlow<List<CloudflareAccountItem>> = integrationsDelegate.cloudflareAccounts
+    val cloudflareSelectedCfAccountId: StateFlow<String> = integrationsDelegate.cloudflareSelectedCfAccountId
+    val cloudflarePagesProjects: StateFlow<List<CloudflarePagesProjectItem>> = integrationsDelegate.cloudflarePagesProjects
+    val cloudflarePagesDeployments: StateFlow<Map<String, List<CloudflarePagesDeploymentItem>>> = integrationsDelegate.cloudflarePagesDeployments
+    val loadingCloudProviders: StateFlow<Set<CloudProvider>> = integrationsDelegate.loadingProviders
+    val cloudProviderErrors: StateFlow<Map<CloudProvider, String?>> = integrationsDelegate.providerErrors
+    val cloudCliStatus: StateFlow<CloudCliStatus?> = integrationsDelegate.cliStatus
+    val installingCloudCliProvider: StateFlow<CloudProvider?> = integrationsDelegate.installingCliProvider
+    val deployingCloudProvider: StateFlow<CloudProvider?> = integrationsDelegate.deployingProvider
 
     val installedSkills: StateFlow<List<CustomizationItem>> = customizationCatalogueDelegate.installedSkills
     val installedPlugins: StateFlow<List<CustomizationItem>> = customizationCatalogueDelegate.installedPlugins
@@ -444,13 +484,37 @@ class AntigravityViewModel : ViewModel() {
         cloneUrl: String,
         destinationParentDir: File,
         repoName: String,
+        accountLogin: String? = null,
+        repoFullName: String = "",
         onDone: ((GitActionResult, File?) -> Unit)? = null
     ) {
         viewModelScope.launch {
-            val (res, clonedDir) = gitStatusDelegate.cloneRepository(context, cloneUrl, destinationParentDir, repoName)
+            val effectiveLogin = accountLogin?.takeIf { it.isNotBlank() } ?: githubAccount.value?.login
+            val gitEnv = withContext(Dispatchers.IO) {
+                GitHubAuthManager.buildGitEnvForAccount(context, effectiveLogin)
+            }
+            val (res, clonedDir) = gitStatusDelegate.cloneRepository(
+                context = context,
+                cloneUrl = cloneUrl,
+                destinationParentDir = destinationParentDir,
+                repoName = repoName,
+                gitEnvOverride = gitEnv
+            )
             if (res.success && clonedDir != null) {
+                if (!effectiveLogin.isNullOrBlank()) {
+                    val detected = GitHubAuthManager.detectGitHubRemoteRepo(clonedDir)
+                    val resolvedFullName = repoFullName.ifBlank { detected?.first.orEmpty() }
+                    ProjectIntegrationsManager.bindGitHub(
+                        context = context,
+                        projectPath = clonedDir.absolutePath,
+                        accountLogin = effectiveLogin,
+                        repoFullName = resolvedFullName,
+                        repoCloneUrl = cloneUrl
+                    )
+                }
                 addProject(context, clonedDir.absolutePath)
                 setWorkspacePath(context, clonedDir.absolutePath)
+                integrationsDelegate.refresh(context, clonedDir.absolutePath, clonedDir.absolutePath)
             }
             onDone?.invoke(res, clonedDir)
         }
@@ -676,6 +740,7 @@ class AntigravityViewModel : ViewModel() {
         refreshMcpServers(context)
         loadProjects(context)
         loadConversationHistory(context)
+        integrationsDelegate.onActiveWorkspaceChanged(context, workspacePath.value, viewModelScope)
     }
 
     fun setModel(context: Context, model: String, budget: String = thinkingBudget.value, cliId: String? = null) =
@@ -947,33 +1012,177 @@ class AntigravityViewModel : ViewModel() {
         }
     }
 
-    fun refreshGitHubState(context: Context) = authDelegate.refreshGitHubState(context)
+    fun refreshGitHubState(context: Context) {
+        authDelegate.refreshGitHubState(context)
+        integrationsDelegate.refresh(context, workspacePath.value)
+    }
     fun switchGitHubAccount(context: Context, login: String) =
         authDelegate.switchGitHubAccount(context, login, ::addLog)
-    fun removeGitHubAccount(context: Context, login: String) =
+    fun removeGitHubAccount(context: Context, login: String) {
         authDelegate.removeGitHubAccount(context, login, ::addLog)
-    fun verifyGitHubConnection(context: Context) =
-        authDelegate.verifyGitHubConnection(context, viewModelScope, ::addLog)
-    fun loadGitHubRepositories(context: Context) =
-        authDelegate.loadGitHubRepositories(context, viewModelScope, ::addLog)
+        integrationsDelegate.refresh(context, workspacePath.value)
+    }
+    fun verifyGitHubConnection(context: Context, login: String? = null) =
+        authDelegate.verifyGitHubConnection(context, viewModelScope, ::addLog, login)
+    fun loadGitHubRepositories(context: Context, login: String? = null) =
+        authDelegate.loadGitHubRepositories(context, viewModelScope, ::addLog, login)
     fun startGitHubDeviceFlow(context: Context) =
         authDelegate.startGitHubDeviceFlow(context, viewModelScope, ::addLog)
     fun cancelGitHubDeviceFlow() = authDelegate.cancelGitHubDeviceFlow()
     fun connectGitHubWithPat(context: Context, token: String) =
         authDelegate.connectGitHubWithPat(context, token, viewModelScope, ::addLog)
-    fun disconnectGitHub(context: Context) =
+    fun disconnectGitHub(context: Context) {
         authDelegate.disconnectGitHub(context, ::addLog)
+        integrationsDelegate.refresh(context, workspacePath.value)
+    }
 
     fun loadProjects(context: Context) = projectWorkspaceDelegate.loadProjects(context, viewModelScope)
     fun saveProjects(context: Context, list: List<File>) = projectWorkspaceDelegate.saveProjects(context, list)
     fun addProject(context: Context, path: String): File = projectWorkspaceDelegate.addProject(context, path, ::addLog)
-    fun removeProject(context: Context, path: String) = projectWorkspaceDelegate.removeProject(context, path, ::addLog)
+    fun removeProject(context: Context, path: String) {
+        projectWorkspaceDelegate.removeProject(context, path, ::addLog)
+        ProjectIntegrationsManager.removeProjectBindings(context, path)
+        integrationsDelegate.refresh(context, workspacePath.value)
+    }
     fun resolveTreeUriToFolder(context: Context, treeUri: Uri): File? = projectWorkspaceDelegate.resolveTreeUriToFolder(context, treeUri)
     fun addProjectFromTreeUri(context: Context, treeUri: Uri): File? = projectWorkspaceDelegate.addProjectFromTreeUri(context, treeUri, ::addLog)
     fun setProjectSortOrder(context: Context, order: ProjectSortOrder) = projectWorkspaceDelegate.setProjectSortOrder(context, order)
     fun createProjectInFolder(context: Context, name: String, parentDir: File): File? = projectWorkspaceDelegate.createProjectInFolder(context, name, parentDir, ::addLog)
     fun createProjectFolder(context: Context, name: String, targetBase: File? = null): File? = projectWorkspaceDelegate.createProjectFolder(context, name, targetBase, ::addLog)
-    fun setWorkspacePath(context: Context, path: String) = projectWorkspaceDelegate.setWorkspacePath(context, path, ::addLog)
+    fun setWorkspacePath(context: Context, path: String) {
+        projectWorkspaceDelegate.setWorkspacePath(context, path, ::addLog)
+        integrationsDelegate.onActiveWorkspaceChanged(context, path, viewModelScope)
+    }
+
+    // ---- Per-Project GitHub & Cloud Integrations ----
+
+    fun refreshIntegrationsState(context: Context, overrideTargetPath: String? = null) =
+        integrationsDelegate.refresh(context, workspacePath.value, overrideTargetPath)
+
+    fun setIntegrationTargetProject(context: Context, path: String) =
+        integrationsDelegate.setTargetProjectPath(context, path, workspacePath.value)
+
+    fun selectCloudAccount(provider: CloudProvider, accountId: String) =
+        integrationsDelegate.selectCloudAccount(provider, accountId)
+
+    fun addAndVerifyCloudAccount(context: Context, provider: CloudProvider, label: String, token: String) =
+        integrationsDelegate.addAndVerifyCloudAccount(context, provider, label, token, workspacePath.value, viewModelScope, ::addLog)
+
+    fun verifyCloudAccount(context: Context, provider: CloudProvider, accountId: String) =
+        integrationsDelegate.verifyCloudAccount(context, provider, accountId, viewModelScope, ::addLog)
+
+    fun removeCloudAccount(context: Context, provider: CloudProvider, accountId: String) =
+        integrationsDelegate.removeCloudAccount(context, provider, accountId, workspacePath.value, viewModelScope, ::addLog)
+
+    fun bindGitHubToProject(
+        context: Context,
+        projectPath: String,
+        accountLogin: String,
+        repoFullName: String = "",
+        repoCloneUrl: String = ""
+    ) = integrationsDelegate.bindGitHubToProject(
+        context, projectPath, accountLogin, repoFullName, repoCloneUrl, workspacePath.value, ::addLog
+    )
+
+    fun unbindGitHubFromProject(context: Context, projectPath: String) =
+        integrationsDelegate.unbindGitHubFromProject(context, projectPath, workspacePath.value, ::addLog)
+
+    fun loadVercelResources(context: Context, accountId: String, teamId: String? = null) =
+        integrationsDelegate.loadVercelResources(context, accountId, teamId, viewModelScope, ::addLog)
+
+    fun loadVercelDeployments(context: Context, accountId: String, projectId: String, teamId: String?) =
+        integrationsDelegate.loadVercelDeployments(context, accountId, projectId, teamId, viewModelScope, ::addLog)
+
+    fun bindVercelToProject(
+        context: Context,
+        projectPath: String,
+        accountId: String,
+        project: VercelProjectItem,
+        injectEnv: Boolean = true,
+        syncMcp: Boolean = false
+    ) = integrationsDelegate.bindVercelToProject(
+        context, projectPath, accountId, project, injectEnv, syncMcp, workspacePath.value, viewModelScope, ::addLog
+    )
+
+    fun updateVercelIntegrationToggles(context: Context, projectPath: String, injectEnv: Boolean, syncMcp: Boolean) =
+        integrationsDelegate.updateVercelToggles(context, projectPath, injectEnv, syncMcp, workspacePath.value, viewModelScope)
+
+    fun pullVercelEnvToWorkspace(context: Context, projectPath: String, accountId: String, projectId: String, teamId: String?) =
+        integrationsDelegate.pullVercelEnvToWorkspace(context, projectPath, accountId, projectId, teamId, viewModelScope, ::addLog)
+
+    fun writeVercelProjectJson(context: Context, projectPath: String, orgId: String, projectId: String) =
+        integrationsDelegate.writeVercelProjectJson(context, projectPath, orgId, projectId, ::addLog)
+
+    fun unbindVercelFromProject(context: Context, projectPath: String) =
+        integrationsDelegate.unbindVercelFromProject(context, projectPath, workspacePath.value, viewModelScope, ::addLog)
+
+    fun loadSupabaseProjects(context: Context, accountId: String) =
+        integrationsDelegate.loadSupabaseProjects(context, accountId, viewModelScope, ::addLog)
+
+    fun bindSupabaseToProject(
+        context: Context,
+        projectPath: String,
+        accountId: String,
+        project: SupabaseProjectItem,
+        injectEnv: Boolean = true,
+        syncMcp: Boolean = true
+    ) = integrationsDelegate.bindSupabaseToProject(
+        context, projectPath, accountId, project, injectEnv, syncMcp, workspacePath.value, viewModelScope, ::addLog
+    )
+
+    fun updateSupabaseIntegrationToggles(context: Context, projectPath: String, injectEnv: Boolean, syncMcp: Boolean) =
+        integrationsDelegate.updateSupabaseToggles(context, projectPath, injectEnv, syncMcp, workspacePath.value, viewModelScope)
+
+    fun pullSupabaseEnvToWorkspace(
+        context: Context,
+        projectPath: String,
+        accountId: String,
+        projectRef: String,
+        apiUrl: String,
+        includeServiceRole: Boolean
+    ) = integrationsDelegate.pullSupabaseEnvToWorkspace(
+        context, projectPath, accountId, projectRef, apiUrl, includeServiceRole, viewModelScope, ::addLog
+    )
+
+    fun unbindSupabaseFromProject(context: Context, projectPath: String) =
+        integrationsDelegate.unbindSupabaseFromProject(context, projectPath, workspacePath.value, viewModelScope, ::addLog)
+
+    fun loadCloudflarePages(context: Context, accountId: String, cfAccountId: String? = null) =
+        integrationsDelegate.loadCloudflarePages(context, accountId, cfAccountId, viewModelScope, ::addLog)
+
+    fun loadCloudflarePagesDeployments(context: Context, accountId: String, cfAccountId: String, projectName: String) =
+        integrationsDelegate.loadCloudflarePagesDeployments(context, accountId, cfAccountId, projectName, viewModelScope, ::addLog)
+
+    fun bindCloudflarePagesToProject(
+        context: Context,
+        projectPath: String,
+        accountId: String,
+        cfAccountId: String,
+        cfAccountName: String,
+        project: CloudflarePagesProjectItem,
+        injectEnv: Boolean = true,
+        syncMcp: Boolean = false
+    ) = integrationsDelegate.bindCloudflarePagesToProject(
+        context, projectPath, accountId, cfAccountId, cfAccountName, project, injectEnv, syncMcp, workspacePath.value, viewModelScope, ::addLog
+    )
+
+    fun updateCloudflareIntegrationToggles(context: Context, projectPath: String, injectEnv: Boolean, syncMcp: Boolean) =
+        integrationsDelegate.updateCloudflareToggles(context, projectPath, injectEnv, syncMcp, workspacePath.value, viewModelScope)
+
+    fun unbindCloudflareFromProject(context: Context, projectPath: String) =
+        integrationsDelegate.unbindCloudflareFromProject(context, projectPath, workspacePath.value, viewModelScope, ::addLog)
+
+    fun refreshCloudCliStatus(context: Context) =
+        integrationsDelegate.refreshCliStatus(context)
+
+    fun installCloudProviderCli(context: Context, provider: CloudProvider) =
+        integrationsDelegate.installProviderCli(context, provider, viewModelScope, ::addLog)
+
+    fun triggerVercelRedeploy(context: Context, accountId: String, projectId: String, projectName: String, teamId: String?) =
+        integrationsDelegate.triggerVercelRedeploy(context, accountId, projectId, projectName, teamId, viewModelScope, ::addLog)
+
+    fun triggerCloudflarePagesDeploy(context: Context, accountId: String, cfAccountId: String, projectName: String) =
+        integrationsDelegate.triggerCloudflarePagesDeploy(context, accountId, cfAccountId, projectName, viewModelScope, ::addLog)
 
     fun saveConversationHistory(context: Context) = conversationManagerDelegate.saveConversationHistory(context)
     fun saveLastActiveConversationId(context: Context, id: String?) = conversationManagerDelegate.saveLastActiveConversationId(context, id)

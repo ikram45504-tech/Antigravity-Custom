@@ -1,9 +1,7 @@
 package id.vern.antigravity.oauth
 
 import android.content.Context
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
-import android.system.Os
+import id.vern.antigravity.integrations.ProjectIntegrationsManager
 import id.vern.antigravity.util.AppLogger
 import org.json.JSONArray
 import org.json.JSONObject
@@ -11,12 +9,6 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
-import java.security.KeyStore
-import java.util.Base64
-import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
-import javax.crypto.SecretKey
-import javax.crypto.spec.GCMParameterSpec
 
 data class GitHubAccount(
     val login: String,
@@ -89,54 +81,11 @@ object GitHubAuthManager {
         return File(dir, MULTI_STORE_FILE_NAME)
     }
 
-    private fun getOrCreateAesKey(): SecretKey? {
-        return runCatching {
-            val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-            (ks.getKey(KEYSTORE_ALIAS, null) as? SecretKey)?.let { return@runCatching it }
-            val keyGen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
-            keyGen.init(
-                KeyGenParameterSpec.Builder(
-                    KEYSTORE_ALIAS,
-                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-                )
-                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                    .setKeySize(256)
-                    .build()
-            )
-            keyGen.generateKey()
-        }.getOrNull()
-    }
+    private fun encryptPayload(plainJson: String): String =
+        EncryptedStoreCrypto.encryptPayload(KEYSTORE_ALIAS, plainJson)
 
-    private fun encryptPayload(plainJson: String): String {
-        val key = getOrCreateAesKey() ?: return plainJson
-        return runCatching {
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.ENCRYPT_MODE, key)
-            val ivB64 = Base64.getEncoder().encodeToString(cipher.iv)
-            val ctB64 = Base64.getEncoder().encodeToString(cipher.doFinal(plainJson.toByteArray(Charsets.UTF_8)))
-            "$ENC_PREFIX$ivB64:$ctB64"
-        }.getOrElse { plainJson }
-    }
-
-    private fun decryptPayload(raw: String): String? {
-        val trimmed = raw.trim()
-        if (trimmed.isEmpty()) return null
-        if (!trimmed.startsWith(ENC_PREFIX)) {
-            return trimmed
-        }
-        val body = trimmed.removePrefix(ENC_PREFIX)
-        val sep = body.indexOf(':')
-        if (sep <= 0) return null
-        val key = getOrCreateAesKey() ?: return null
-        return runCatching {
-            val iv = Base64.getDecoder().decode(body.substring(0, sep))
-            val ct = Base64.getDecoder().decode(body.substring(sep + 1))
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv))
-            String(cipher.doFinal(ct), Charsets.UTF_8)
-        }.getOrNull()
-    }
+    private fun decryptPayload(raw: String): String? =
+        EncryptedStoreCrypto.decryptPayload(KEYSTORE_ALIAS, raw)
 
     private fun parseAccountJson(obj: JSONObject?): GitHubAccount? {
         if (obj == null) return null
@@ -242,11 +191,7 @@ object GitHubAuthManager {
     }
 
     private fun applyOwnerOnlyPermissions(file: File) {
-        file.setReadable(false, false)
-        file.setReadable(true, true)
-        file.setWritable(false, false)
-        file.setWritable(true, true)
-        try { Os.chmod(file.absolutePath, 384) } catch (_: Exception) {}
+        EncryptedStoreCrypto.applyOwnerOnlyPermissions(file)
     }
 
     internal fun cleanGitConfigLines(
@@ -315,6 +260,141 @@ object GitHubAuthManager {
         return sb.toString()
     }
 
+    internal fun safeProfileDirName(login: String): String =
+        login.trim().lowercase().replace(Regex("[^a-z0-9._-]"), "_").ifBlank { "default" }
+
+    internal fun buildProfileGitConfig(
+        certPath: String,
+        credentialsFilePath: String?,
+        name: String?,
+        email: String?
+    ): String {
+        val sb = StringBuilder()
+        sb.append("[safe]\n\tdirectory = *\n")
+        if (certPath.isNotBlank()) {
+            sb.append("[http]\n\tsslCAInfo = ").append(certPath).append("\n")
+        }
+        if (!credentialsFilePath.isNullOrBlank()) {
+            sb.append("[credential \"https://github.com\"]\n\thelper = store --file ")
+                .append(credentialsFilePath)
+                .append("\n")
+        }
+        if (!name.isNullOrBlank() || !email.isNullOrBlank()) {
+            sb.append("[user]\n")
+            if (!name.isNullOrBlank()) sb.append("\tname = ").append(name).append("\n")
+            if (!email.isNullOrBlank()) sb.append("\temail = ").append(email).append("\n")
+        }
+        return sb.toString()
+    }
+
+    internal fun parseGitHubRemoteRepo(rawUrl: String): Pair<String, String>? {
+        val trimmed = rawUrl.trim()
+        if (trimmed.isEmpty()) return null
+        val sshMatch = Regex("^git@github\\.com:([^/\\s]+)/([^/\\s]+?)(?:\\.git)?/?$", RegexOption.IGNORE_CASE)
+            .find(trimmed)
+        if (sshMatch != null) {
+            val owner = sshMatch.groupValues[1]
+            val repo = sshMatch.groupValues[2]
+            val fullName = "$owner/$repo"
+            return fullName to "https://github.com/$fullName.git"
+        }
+        val httpsMatch = Regex("^https?://(?:[^@/\\s]+@)?github\\.com/([^/\\s]+)/([^/\\s]+?)(?:\\.git)?/?$", RegexOption.IGNORE_CASE)
+            .find(trimmed)
+        if (httpsMatch != null) {
+            val owner = httpsMatch.groupValues[1]
+            val repo = httpsMatch.groupValues[2]
+            val fullName = "$owner/$repo"
+            return fullName to "https://github.com/$fullName.git"
+        }
+        return null
+    }
+
+    fun detectGitHubRemoteRepo(projectDir: File): Pair<String, String>? {
+        val gitConfig = File(projectDir, ".git/config")
+        if (!gitConfig.isFile) return null
+        return runCatching {
+            val lines = gitConfig.readLines(Charsets.UTF_8)
+            var inRemoteOrigin = false
+            var firstFound: Pair<String, String>? = null
+            for (line in lines) {
+                val trimmed = line.trim()
+                if (trimmed.startsWith("[")) {
+                    inRemoteOrigin = trimmed.equals("[remote \"origin\"]", ignoreCase = true)
+                    continue
+                }
+                if (trimmed.startsWith("url") && trimmed.contains("=")) {
+                    val rawUrl = trimmed.substringAfter("=").trim()
+                    val parsed = parseGitHubRemoteRepo(rawUrl)
+                    if (parsed != null) {
+                        if (inRemoteOrigin) return@runCatching parsed
+                        if (firstFound == null) firstFound = parsed
+                    }
+                }
+            }
+            firstFound
+        }.getOrNull()
+    }
+
+    private fun getProfilesRootDir(context: Context): File =
+        File(context.filesDir, ".gemini/git-profiles").apply { mkdirs() }
+
+    private fun ensureUnboundProfileConfig(context: Context): File {
+        val certPath = File(context.filesDir, "usr/etc/tls/cert.pem").absolutePath
+        val unboundDir = File(getProfilesRootDir(context), "_unbound").apply { mkdirs() }
+        val cfgFile = File(unboundDir, "gitconfig")
+        cfgFile.writeText(buildProfileGitConfig(certPath, null, null, null), Charsets.UTF_8)
+        applyOwnerOnlyPermissions(cfgFile)
+        return cfgFile
+    }
+
+    private fun writeAccountProfile(context: Context, account: GitHubAccount): File {
+        val certPath = File(context.filesDir, "usr/etc/tls/cert.pem").absolutePath
+        val profileDir = File(getProfilesRootDir(context), safeProfileDirName(account.login)).apply { mkdirs() }
+        val credFile = File(profileDir, "credentials")
+        credFile.writeText("https://${account.login}:${account.accessToken}@github.com\n", Charsets.UTF_8)
+        applyOwnerOnlyPermissions(credFile)
+
+        val cfgFile = File(profileDir, "gitconfig")
+        cfgFile.writeText(
+            buildProfileGitConfig(
+                certPath = certPath,
+                credentialsFilePath = credFile.absolutePath,
+                name = account.name,
+                email = account.email
+            ),
+            Charsets.UTF_8
+        )
+        applyOwnerOnlyPermissions(cfgFile)
+        return cfgFile
+    }
+
+    private fun deleteAccountProfile(context: Context, login: String) {
+        runCatching {
+            val profileDir = File(getProfilesRootDir(context), safeProfileDirName(login))
+            if (profileDir.exists()) profileDir.deleteRecursively()
+        }
+    }
+
+    fun buildGitEnvForAccount(context: Context, login: String?): Map<String, String> {
+        val unbound = ensureUnboundProfileConfig(context)
+        val cleanLogin = login?.trim().orEmpty()
+        if (cleanLogin.isEmpty()) {
+            return mapOf("GIT_CONFIG_GLOBAL" to unbound.absolutePath)
+        }
+        val account = getAccounts(context).firstOrNull { it.login.equals(cleanLogin, ignoreCase = true) }
+            ?: return mapOf("GIT_CONFIG_GLOBAL" to unbound.absolutePath)
+        val cfg = writeAccountProfile(context, account)
+        return mapOf("GIT_CONFIG_GLOBAL" to cfg.absolutePath)
+    }
+
+    fun buildGitEnvForProject(context: Context, workingDir: File?): Map<String, String> {
+        val unbound = ensureUnboundProfileConfig(context)
+        val dirPath = workingDir?.absolutePath ?: return mapOf("GIT_CONFIG_GLOBAL" to unbound.absolutePath)
+        val boundLogin = ProjectIntegrationsManager.getBindingForProject(context, dirPath)?.github?.accountLogin
+            ?: return mapOf("GIT_CONFIG_GLOBAL" to unbound.absolutePath)
+        return buildGitEnvForAccount(context, boundLogin)
+    }
+
     fun saveAccount(context: Context, account: GitHubAccount) {
         synchronized(lock) {
             val existing = readStoreState(context).accounts
@@ -345,7 +425,6 @@ object GitHubAuthManager {
     }
 
     fun removeAccount(context: Context, login: String): Boolean {
-        var hasRemaining = false
         val removed = synchronized(lock) {
             val state = readStoreState(context)
             val remaining = state.accounts.filterNot { it.login.equals(login, ignoreCase = true) }
@@ -356,15 +435,12 @@ object GitHubAuthManager {
                 state.activeLogin
             }
             writeStoreState(context, AccountStoreState(nextActive, remaining))
-            hasRemaining = remaining.isNotEmpty()
             true
         }
         if (removed) {
-            if (hasRemaining) {
-                syncGitCredentials(context)
-            } else {
-                removeGitCredentials(context)
-            }
+            deleteAccountProfile(context, login)
+            ProjectIntegrationsManager.removeBindingsForGitHubLogin(context, login)
+            syncGitCredentials(context)
         }
         return removed
     }
@@ -382,25 +458,15 @@ object GitHubAuthManager {
     }
 
     fun syncGitCredentials(context: Context) {
-        val account = getAccount(context) ?: return
         try {
-            val homeDir = File(context.filesDir, "home").apply { mkdirs() }
-            val credFile = File(homeDir, ".git-credentials")
-            val existingLines = if (credFile.isFile) {
-                credFile.readLines(Charsets.UTF_8).filterNot { it.contains("@github.com") }
-            } else {
-                emptyList()
+            // Remove legacy global GitHub credentials so unlinked projects remain strictly isolated.
+            removeGitCredentials(context)
+            ensureUnboundProfileConfig(context)
+            getAccounts(context).forEach { account ->
+                writeAccountProfile(context, account)
             }
-            val newLine = "https://${account.login}:${account.accessToken}@github.com"
-            credFile.writeText((existingLines + newLine).joinToString("\n") + "\n", Charsets.UTF_8)
-            applyOwnerOnlyPermissions(credFile)
-
-            val gitConfig = File(homeDir, ".gitconfig")
-            val currentLines = if (gitConfig.isFile) gitConfig.readLines(Charsets.UTF_8) else emptyList()
-            gitConfig.writeText(buildSyncedGitConfig(currentLines, account.name, account.email), Charsets.UTF_8)
-            applyOwnerOnlyPermissions(gitConfig)
         } catch (e: Exception) {
-            AppLogger.e(TAG, "Failed to sync git credentials: ${e.message}")
+            AppLogger.e(TAG, "Failed to sync isolated git profiles: ${e.message}")
         }
     }
 
@@ -431,9 +497,12 @@ object GitHubAuthManager {
         }
     }
 
-    fun verifyConnection(context: Context): GitHubVerificationResult {
-        val account = getAccount(context)
-            ?: return GitHubVerificationResult(isValid = false, message = "No GitHub account connected.")
+    fun verifyConnection(context: Context, login: String? = null): GitHubVerificationResult {
+        val account = if (!login.isNullOrBlank()) {
+            getAccounts(context).firstOrNull { it.login.equals(login, ignoreCase = true) }
+        } else {
+            getAccount(context)
+        } ?: return GitHubVerificationResult(isValid = false, message = "No GitHub account connected.")
         return try {
             val conn = (URL(USER_API_URL).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"

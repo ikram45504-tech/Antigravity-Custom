@@ -394,13 +394,18 @@ class AuthDelegate {
         }
     }
 
-    fun verifyGitHubConnection(context: Context, scope: CoroutineScope, onLog: (String, String, Boolean) -> Unit) {
+    fun verifyGitHubConnection(
+        context: Context,
+        scope: CoroutineScope,
+        onLog: (String, String, Boolean) -> Unit,
+        login: String? = null
+    ) {
         if (mutableIsGithubVerifying.value) return
         mutableIsGithubVerifying.value = true
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 GitHubAuthManager.syncGitCredentials(context)
-                GitHubAuthManager.verifyConnection(context)
+                GitHubAuthManager.verifyConnection(context, login)
             }
             mutableGithubVerification.value = result
             mutableIsGithubVerifying.value = false
@@ -408,8 +413,18 @@ class AuthDelegate {
         }
     }
 
-    fun loadGitHubRepositories(context: Context, scope: CoroutineScope, onLog: (String, String, Boolean) -> Unit) {
-        val token = GitHubAuthManager.getAccount(context)?.accessToken ?: return
+    fun loadGitHubRepositories(
+        context: Context,
+        scope: CoroutineScope,
+        onLog: (String, String, Boolean) -> Unit,
+        login: String? = null
+    ) {
+        val account = if (!login.isNullOrBlank()) {
+            GitHubAuthManager.getAccounts(context).firstOrNull { it.login.equals(login, ignoreCase = true) }
+        } else {
+            GitHubAuthManager.getAccount(context)
+        }
+        val token = account?.accessToken ?: return
         if (mutableIsLoadingGithubRepos.value) return
         mutableIsLoadingGithubRepos.value = true
         mutableGithubReposError.value = null

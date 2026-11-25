@@ -4,6 +4,8 @@ import android.content.Context
 import id.vern.antigravity.data.ChangedFileItem
 import id.vern.antigravity.executor.EngineExecutor
 import id.vern.antigravity.executor.shellQuote
+import id.vern.antigravity.integrations.ProjectIntegrationsManager
+import id.vern.antigravity.oauth.GitHubAuthManager
 import id.vern.antigravity.util.NetworkDownloader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -174,11 +176,35 @@ class GitStatusDelegate {
         return runGitAction(context, workspacePath, cmd, "Committed changes")
     }
 
-    suspend fun pullChanges(context: Context, workspacePath: String?): GitActionResult =
-        runGitAction(context, workspacePath, "git pull --rebase", "Pulled latest changes")
+    private fun checkGitHubBindingError(context: Context, workspacePath: String?): GitActionResult? {
+        val rootDir = workspacePath?.let { File(it) } ?: return null
+        if (!rootDir.isDirectory) return null
+        val isGitHubRemote = GitHubAuthManager.detectGitHubRemoteRepo(rootDir) != null
+        if (!isGitHubRemote) return null
+        val bound = ProjectIntegrationsManager.getBindingForProject(context, rootDir.absolutePath)?.github
+        return if (bound == null) {
+            GitActionResult(
+                false,
+                "No GitHub account linked to this project. Link an account in Settings → GitHub."
+            )
+        } else null
+    }
 
-    suspend fun pushChanges(context: Context, workspacePath: String?): GitActionResult =
-        runGitAction(context, workspacePath, "git push", "Pushed changes to remote")
+    suspend fun pullChanges(context: Context, workspacePath: String?): GitActionResult {
+        checkGitHubBindingError(context, workspacePath)?.let { err ->
+            mutableGitActionStatus.value = err
+            return err
+        }
+        return runGitAction(context, workspacePath, "git pull --rebase", "Pulled latest changes")
+    }
+
+    suspend fun pushChanges(context: Context, workspacePath: String?): GitActionResult {
+        checkGitHubBindingError(context, workspacePath)?.let { err ->
+            mutableGitActionStatus.value = err
+            return err
+        }
+        return runGitAction(context, workspacePath, "git push", "Pushed changes to remote")
+    }
 
     suspend fun checkoutBranch(
         context: Context,
@@ -204,7 +230,8 @@ class GitStatusDelegate {
         context: Context,
         cloneUrl: String,
         destinationParentDir: File,
-        repoName: String
+        repoName: String,
+        gitEnvOverride: Map<String, String> = emptyMap()
     ): Pair<GitActionResult, File?> = withContext(Dispatchers.IO) {
         val safeName = repoName.trim().replace(Regex("[^a-zA-Z0-9._-]"), "_")
         if (safeName.isBlank()) {
@@ -223,9 +250,10 @@ class GitStatusDelegate {
         val output = StringBuilder()
         val exitCode = try {
             EngineExecutor.executeCommand(
-                context,
-                "git clone -- ${cloneUrl.shellQuote()} ${targetDir.absolutePath.shellQuote()}",
-                workingDir = destinationParentDir
+                context = context,
+                command = "git clone -- ${cloneUrl.shellQuote()} ${targetDir.absolutePath.shellQuote()}",
+                workingDir = destinationParentDir,
+                envOverrides = gitEnvOverride
             ) { line, _ ->
                 if (line.isNotBlank()) output.appendLine(line)
             }

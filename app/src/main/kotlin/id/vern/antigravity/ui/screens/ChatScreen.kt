@@ -66,6 +66,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Archive
@@ -1076,6 +1077,19 @@ fun ChatScreen(
                                                                 onClick = {
                                                                     showProjectMenu = false
                                                                     viewModel.startNewConversation(context, projectDir.absolutePath)
+                                                                    scope.launch { drawerState.close() }
+                                                                }
+                                                            )
+                                                            DropdownMenuItem(
+                                                                text = { Text(stringResource(R.string.menu_project_integrations)) },
+                                                                leadingIcon = {
+                                                                    Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(18.dp))
+                                                                },
+                                                                onClick = {
+                                                                    showProjectMenu = false
+                                                                    viewModel.setIntegrationTargetProject(context, projectDir.absolutePath)
+                                                                    settingsInitialPage = SettingsPage.CLOUD_INTEGRATIONS
+                                                                    showSettingsBottomSheet = true
                                                                     scope.launch { drawerState.close() }
                                                                 }
                                                             )

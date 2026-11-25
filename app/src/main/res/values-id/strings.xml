@@ -462,6 +462,8 @@
     <string name="settings_mcp_args_hint">misal: -y @modelcontextprotocol/server-sqlite</string>
     <string name="settings_mcp_url_label">URL HTTP Streamable</string>
     <string name="settings_mcp_url_hint">https://mcp.mycompany.com/mcp</string>
+    <string name="settings_mcp_headers_label">Header HTTP (opsional, Key: Value per baris)</string>
+    <string name="settings_mcp_headers_hint">Authorization: Bearer token</string>
     <string name="settings_mcp_btn_install">Pasang</string>
     <string name="settings_mcp_raw_title">Konfigurasi MCP (~/.gemini/config/mcp_config.json)</string>
     <string name="settings_mcp_btn_save">Simpan JSON</string>
@@ -576,6 +578,7 @@
     <string name="sort_date_asc">Tanggal Modifikasi (Terlama)</string>
     <string name="drawer_add_project_folder">Tambah Folder Project</string>
     <string name="menu_new_chat_in_project">Chat baru di project</string>
+    <string name="menu_project_integrations">Integrasi project</string>
     <string name="menu_project_options">Opsi project</string>
     <string name="menu_delete_project_plain">Hapus project</string>
     <string name="chat_pin_conversation">Sematkan percakapan</string>

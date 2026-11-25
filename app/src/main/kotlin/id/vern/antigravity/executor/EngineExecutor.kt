@@ -3,6 +3,7 @@ package id.vern.antigravity.executor
 import android.content.Context
 import android.system.Os
 import id.vern.antigravity.install.BootstrapInstaller
+import id.vern.antigravity.integrations.ProjectIntegrationsManager
 import id.vern.antigravity.oauth.GitHubAuthManager
 import id.vern.antigravity.oauth.OAuthManager
 import id.vern.antigravity.util.AppLogger
@@ -64,7 +65,8 @@ object EngineExecutor {
         goDebug: String,
         shellBin: String? = null,
         requireCertExists: Boolean = false,
-        includeOpenSslConf: Boolean = false
+        includeOpenSslConf: Boolean = false,
+        envOverrides: Map<String, String> = emptyMap()
     ) {
         env.remove("LD_PRELOAD")
         env["PREFIX"] = prefixDir.absolutePath
@@ -104,14 +106,16 @@ object EngineExecutor {
         env["APPLICATION_ID"] = context.packageName
         env["ANTIGRAVITY_APP_DATA_DIR"] = File(homeDir, ".gemini/antigravity-cli").apply { mkdirs() }.absolutePath
         readGatewayToken(filesDir)?.let { env["AGY_GATEWAY_TOKEN"] = it }
+        envOverrides.forEach { (k, v) -> env[k] = v }
     }
 
     suspend fun executeCommand(
         context: Context,
         command: String,
         workingDir: File? = null,
+        envOverrides: Map<String, String> = emptyMap(),
         onOutputLine: (String, Boolean) -> Unit
-    ): Int = executeCommandWithUpdates(context, command, workingDir) { line, isErr, isUpdate ->
+    ): Int = executeCommandWithUpdates(context, command, workingDir, envOverrides) { line, isErr, isUpdate ->
         onOutputLine(line, isErr)
     }
 
@@ -119,6 +123,7 @@ object EngineExecutor {
         context: Context,
         command: String,
         workingDir: File? = null,
+        envOverrides: Map<String, String> = emptyMap(),
         onOutput: (String, Boolean, Boolean) -> Unit
     ): Int = withContext(Dispatchers.IO) {
         healEnvironment(context)
@@ -169,6 +174,11 @@ object EngineExecutor {
 
             val prefixLib = File(filesDir, "usr/lib")
             val certFile = File(filesDir, "usr/etc/tls/cert.pem")
+            val projectEnv = LinkedHashMap<String, String>().apply {
+                putAll(GitHubAuthManager.buildGitEnvForProject(context, targetCwd))
+                putAll(ProjectIntegrationsManager.buildRuntimeEnv(context, targetCwd))
+                putAll(envOverrides)
+            }
             buildBaseProcessEnv(
                 env = pb.environment(),
                 context = context,
@@ -185,7 +195,8 @@ object EngineExecutor {
                 goDebug = "netdns=go",
                 shellBin = bashBin,
                 requireCertExists = false,
-                includeOpenSslConf = true
+                includeOpenSslConf = true,
+                envOverrides = projectEnv
             )
 
             val process = pb.start()
@@ -328,6 +339,11 @@ object EngineExecutor {
             id.vern.antigravity.service.PermissionConfigService.syncSettingsJsonFiles(context)
         } catch (e: Exception) {}
 
+        val projectEnv = LinkedHashMap<String, String>().apply {
+            putAll(GitHubAuthManager.buildGitEnvForProject(context, targetCwd))
+            putAll(ProjectIntegrationsManager.buildRuntimeEnv(context, targetCwd))
+        }
+
         if (ldBin.exists() && agyBin.exists()) {
             return@withContext try {
                 val libraryPaths = listOf(libDir.absolutePath, prefixLib.absolutePath)
@@ -364,7 +380,8 @@ object EngineExecutor {
                     validGitTemplate = validGitTemplate,
                     certFile = certFile,
                     goDebug = "netdns=cgo",
-                    requireCertExists = true
+                    requireCertExists = true,
+                    envOverrides = projectEnv
                 )
 
                 streamProcess(pb, executionKey, onOutputLine)
@@ -405,7 +422,8 @@ object EngineExecutor {
                     validGitTemplate = validGitTemplate,
                     certFile = certFile,
                     goDebug = "netdns=cgo",
-                    requireCertExists = true
+                    requireCertExists = true,
+                    envOverrides = projectEnv
                 )
                 streamProcess(pb, executionKey, onOutputLine)
             } catch (e: Exception) {

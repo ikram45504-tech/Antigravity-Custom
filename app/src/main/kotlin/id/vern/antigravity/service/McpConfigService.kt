@@ -14,6 +14,7 @@ data class McpServerItem(
     val args: List<String> = emptyList(),
     val env: Map<String, String> = emptyMap(),
     val url: String = "",
+    val headers: Map<String, String> = emptyMap(),
     val source: String = "global",
     val isRemote: Boolean = false,
     val isEnabled: Boolean = true
@@ -73,6 +74,15 @@ object McpConfigService {
                                 envMap[ek] = envObj.optString(ek, "")
                             }
                         }
+                        val headersMap = mutableMapOf<String, String>()
+                        val headersObj = cfg.optJSONObject("headers")
+                        if (headersObj != null) {
+                            val hKeys = headersObj.keys()
+                            while (hKeys.hasNext()) {
+                                val hk = hKeys.next()
+                                headersMap[hk] = headersObj.optString(hk, "")
+                            }
+                        }
                         val isRemote = url.isNotBlank()
                         val disabled = cfg.optBoolean("disabled", false)
                         servers.add(
@@ -82,6 +92,7 @@ object McpConfigService {
                                 args = argsList,
                                 env = envMap,
                                 url = url,
+                                headers = headersMap,
                                 source = "Global",
                                 isRemote = isRemote,
                                 isEnabled = !disabled
@@ -152,27 +163,7 @@ object McpConfigService {
             }
 
             val mcpServers = root.optJSONObject("mcpServers") ?: JSONObject().also { root.put("mcpServers", it) }
-            val serverObj = JSONObject()
-            if (server.isRemote) {
-                serverObj.put("url", server.url.trim())
-            } else {
-                serverObj.put("command", server.command.trim())
-                if (server.args.isNotEmpty()) {
-                    val arr = JSONArray()
-                    server.args.forEach { arr.put(it) }
-                    serverObj.put("args", arr)
-                }
-                if (server.env.isNotEmpty()) {
-                    val envObj = JSONObject()
-                    server.env.forEach { (k, v) -> envObj.put(k, v) }
-                    serverObj.put("env", envObj)
-                }
-            }
-            if (!server.isEnabled) {
-                serverObj.put("disabled", true)
-            }
-
-            mcpServers.put(server.name.trim(), serverObj)
+            mcpServers.put(server.name.trim(), serializeServerJson(server))
             val jsonStr = root.toString(2)
 
             for (target in getCandidateFiles(context)) {
@@ -242,6 +233,86 @@ object McpConfigService {
             true
         } catch (e: Exception) {
             Log.e(TAG, "Invalid JSON in saveRawConfig: ${e.message}", e)
+            false
+        }
+    }
+
+    private fun serializeServerJson(server: McpServerItem): JSONObject {
+        val serverObj = JSONObject()
+        if (server.isRemote) {
+            serverObj.put("url", server.url.trim())
+            if (server.headers.isNotEmpty()) {
+                val headersObj = JSONObject()
+                server.headers.forEach { (k, v) ->
+                    if (k.isNotBlank()) headersObj.put(k, v)
+                }
+                if (headersObj.length() > 0) {
+                    serverObj.put("headers", headersObj)
+                }
+            }
+        } else {
+            serverObj.put("command", server.command.trim())
+            if (server.args.isNotEmpty()) {
+                val arr = JSONArray()
+                server.args.forEach { arr.put(it) }
+                serverObj.put("args", arr)
+            }
+            if (server.env.isNotEmpty()) {
+                val envObj = JSONObject()
+                server.env.forEach { (k, v) -> envObj.put(k, v) }
+                serverObj.put("env", envObj)
+            }
+        }
+        if (!server.isEnabled) {
+            serverObj.put("disabled", true)
+        }
+        return serverObj
+    }
+
+    internal fun applyManagedServersJson(
+        existingJson: String,
+        managedServers: Map<String, McpServerItem?>
+    ): String {
+        val trimmed = existingJson.trim()
+        val root = if (trimmed.startsWith("{")) {
+            runCatching { JSONObject(trimmed) }.getOrElse { JSONObject() }
+        } else {
+            JSONObject()
+        }
+        val mcpServers = root.optJSONObject("mcpServers") ?: JSONObject().also { root.put("mcpServers", it) }
+        managedServers.forEach { (key, server) ->
+            if (server == null) {
+                mcpServers.remove(key)
+            } else {
+                mcpServers.put(key, serializeServerJson(server))
+            }
+        }
+        return root.toString(2)
+    }
+
+    suspend fun upsertManagedServers(
+        context: Context,
+        managedServers: Map<String, McpServerItem?>
+    ): Boolean = withContext(Dispatchers.IO) {
+        val primaryFile = getPrimaryConfigFile(context)
+        try {
+            val existingText = if (primaryFile.exists() && primaryFile.canRead()) {
+                primaryFile.readText(Charsets.UTF_8)
+            } else {
+                ""
+            }
+            val updatedJson = applyManagedServersJson(existingText, managedServers)
+            for (target in getCandidateFiles(context)) {
+                try {
+                    target.parentFile?.mkdirs()
+                    target.writeText(updatedJson, Charsets.UTF_8)
+                    target.setReadable(true, false)
+                    target.setWritable(true, false)
+                } catch (_: Exception) {}
+            }
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to upsert managed MCP servers: ${e.message}", e)
             false
         }
     }

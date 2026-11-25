@@ -405,6 +405,7 @@ fun AddMcpServerDialog(
     var command by remember { mutableStateOf("") }
     var argsText by remember { mutableStateOf("") }
     var urlText by remember { mutableStateOf("") }
+    var headersText by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -487,6 +488,16 @@ fun AddMcpServerDialog(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = headersText,
+                        onValueChange = { headersText = it },
+                        label = { Text(stringResource(R.string.settings_mcp_headers_label)) },
+                        placeholder = { Text(stringResource(R.string.settings_mcp_headers_hint)) },
+                        minLines = 2,
+                        maxLines = 4,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
         },
@@ -496,11 +507,22 @@ fun AddMcpServerDialog(
                     if (serverName.isNotBlank()) {
                         val isRemote = transportType == 1
                         val argsList = if (argsText.isNotBlank()) argsText.trim().split(Regex("\\s+")) else emptyList()
+                        val parsedHeaders = if (isRemote && headersText.isNotBlank()) {
+                            headersText.lines().mapNotNull { line ->
+                                val idx = line.indexOf(':')
+                                if (idx <= 0) null else {
+                                    val k = line.substring(0, idx).trim()
+                                    val v = line.substring(idx + 1).trim()
+                                    if (k.isNotEmpty() && v.isNotEmpty()) k to v else null
+                                }
+                            }.toMap()
+                        } else emptyMap()
                         val item = McpServerItem(
                             name = serverName.trim(),
                             command = command.trim(),
                             args = argsList,
                             url = urlText.trim(),
+                            headers = parsedHeaders,
                             isRemote = isRemote
                         )
                         onConfirm(item)

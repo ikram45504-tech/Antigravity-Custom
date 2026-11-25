@@ -76,6 +76,8 @@ import id.vern.antigravity.ui.components.getModelQuotaPercentage
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -143,6 +145,7 @@ import id.vern.antigravity.data.ThemePreset
 import id.vern.antigravity.data.ModelAvailability
 import id.vern.antigravity.data.AvailableModelInfo
 import id.vern.antigravity.data.SubscriptionTierType
+import id.vern.antigravity.oauth.GitHubAuthManager
 import id.vern.antigravity.oauth.GitHubRepoItem
 import id.vern.antigravity.oauth.StoredAccount
 import id.vern.antigravity.ui.components.LogViewer
@@ -177,6 +180,12 @@ fun GitHubSettingsPage(
     val deviceCode by viewModel.githubDeviceCode.collectAsStateWithLifecycle()
     val isAuthenticating by viewModel.isGithubAuthenticating.collectAsStateWithLifecycle()
     val authError by viewModel.githubAuthError.collectAsStateWithLifecycle()
+    val workspacePath by viewModel.workspacePath.collectAsStateWithLifecycle()
+    val projectList by viewModel.projectList.collectAsStateWithLifecycle()
+    val targetProjectPath by viewModel.integrationTargetProjectPath.collectAsStateWithLifecycle()
+    val targetBinding by viewModel.integrationTargetBinding.collectAsStateWithLifecycle()
+    val effectiveProjectPath = targetProjectPath.ifBlank { workspacePath }
+    var showProjectPicker by remember { mutableStateOf(false) }
     var patInput by remember { mutableStateOf("") }
     var showPatOption by remember { mutableStateOf(false) }
     var showAddAnotherAccount by remember { mutableStateOf(false) }
@@ -206,6 +215,154 @@ fun GitHubSettingsPage(
                 .weight(1f)
                 .verticalScroll(scrollState)
         ) {
+            SettingsCard {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Project GitHub Binding",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = if (effectiveProjectPath.isNotBlank()) File(effectiveProjectPath).name else "No active project",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        if (projectList.isNotEmpty()) {
+                            Box {
+                                OutlinedButton(
+                                    onClick = { showProjectPicker = true },
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                ) {
+                                    Text("Switch", fontSize = 12.sp)
+                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                                }
+                                DropdownMenu(
+                                    expanded = showProjectPicker,
+                                    onDismissRequest = { showProjectPicker = false }
+                                ) {
+                                    projectList.forEach { proj ->
+                                        DropdownMenuItem(
+                                            text = { Text(proj.name) },
+                                            onClick = {
+                                                showProjectPicker = false
+                                                viewModel.setIntegrationTargetProject(context, proj.absolutePath)
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    val detectedRemote = remember(effectiveProjectPath) {
+                        if (effectiveProjectPath.isNotBlank()) {
+                            GitHubAuthManager.detectGitHubRemoteRepo(File(effectiveProjectPath))
+                        } else null
+                    }
+                    val boundGh = targetBinding.github
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (boundGh != null) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Link, contentDescription = null, tint = AntigravityGreen, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Linked to @${boundGh.accountLogin}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = AntigravityGreen
+                            )
+                        }
+                        val repoDisplay = boundGh.repoFullName.ifBlank { detectedRemote?.first.orEmpty() }
+                        if (repoDisplay.isNotBlank()) {
+                            Text(
+                                text = "Repository: $repoDisplay",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (githubAccounts.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                githubAccounts.filterNot { it.login.equals(boundGh.accountLogin, ignoreCase = true) }.take(2).forEach { otherAcc ->
+                                    OutlinedButton(
+                                        onClick = {
+                                            viewModel.bindGitHubToProject(
+                                                context = context,
+                                                projectPath = effectiveProjectPath,
+                                                accountLogin = otherAcc.login,
+                                                repoFullName = repoDisplay,
+                                                repoCloneUrl = boundGh.repoCloneUrl.ifBlank { detectedRemote?.second.orEmpty() }
+                                            )
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Text("Use @${otherAcc.login}", fontSize = 11.sp)
+                                    }
+                                }
+                                OutlinedButton(
+                                    onClick = { viewModel.unbindGitHubFromProject(context, effectiveProjectPath) },
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AntigravityRed),
+                                    border = BorderStroke(1.dp, AntigravityRed.copy(alpha = 0.4f)),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                ) {
+                                    Icon(Icons.Default.LinkOff, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Unlink", fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = "Not linked to this project (strict isolation — no GitHub credentials injected).",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (detectedRemote != null) {
+                            Text(
+                                text = "Detected remote: ${detectedRemote.first}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = AntigravityBlue
+                            )
+                        }
+                        if (githubAccounts.isNotEmpty() && effectiveProjectPath.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                githubAccounts.take(3).forEach { accItem ->
+                                    OutlinedButton(
+                                        onClick = {
+                                            viewModel.bindGitHubToProject(
+                                                context = context,
+                                                projectPath = effectiveProjectPath,
+                                                accountLogin = accItem.login,
+                                                repoFullName = detectedRemote?.first.orEmpty(),
+                                                repoCloneUrl = detectedRemote?.second.orEmpty()
+                                            )
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Link @${accItem.login}", fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
             if (githubAccount != null) {
                 val acc = githubAccount!!
                 SettingsCard {
@@ -268,7 +425,7 @@ fun GitHubSettingsPage(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Git credentials are encrypted at rest and synced to ~/.gitconfig for all repositories.",
+                            text = "Git credentials are encrypted at rest and isolated per project via GIT_CONFIG_GLOBAL.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                         )
@@ -696,7 +853,9 @@ fun GitHubSettingsPage(
                             context = context,
                             cloneUrl = targetRepo.cloneUrl,
                             destinationParentDir = parentDir,
-                            repoName = folderName
+                            repoName = folderName,
+                            accountLogin = githubAccount?.login,
+                            repoFullName = targetRepo.fullName
                         ) { result, _ ->
                             Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
                             if (result.success) {

@@ -467,6 +467,8 @@
     <string name="settings_mcp_args_hint">e.g., -y @modelcontextprotocol/server-sqlite</string>
     <string name="settings_mcp_url_label">Streamable HTTP URL</string>
     <string name="settings_mcp_url_hint">https://mcp.mycompany.com/mcp</string>
+    <string name="settings_mcp_headers_label">HTTP Headers (optional, Key: Value per line)</string>
+    <string name="settings_mcp_headers_hint">Authorization: Bearer token</string>
     <string name="settings_mcp_btn_install">Install</string>
     <string name="settings_mcp_raw_title">MCP Configuration (~/.gemini/config/mcp_config.json)</string>
     <string name="settings_mcp_btn_save">Save JSON</string>
@@ -581,6 +583,7 @@
     <string name="sort_date_asc">Date Modified (Oldest)</string>
     <string name="drawer_add_project_folder">Add Project Folder</string>
     <string name="menu_new_chat_in_project">New chat in project</string>
+    <string name="menu_project_integrations">Project integrations</string>
     <string name="menu_project_options">Project options</string>
     <string name="menu_delete_project_plain">Delete project</string>
     <string name="chat_pin_conversation">Pin conversation</string>
