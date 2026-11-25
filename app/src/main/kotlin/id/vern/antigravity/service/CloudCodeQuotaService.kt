@@ -34,9 +34,11 @@ import javax.net.ssl.X509TrustManager
 
 object CloudCodeQuotaService {
     private const val TAG = "CloudCodeQuota"
-    private const val QUOTA_URL = "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary"
-    private const val MODELS_URL = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels"
-    private const val TIER_URL = "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
+    private const val DAILY_BASE_URL = "https://daily-cloudcode-pa.googleapis.com/v1internal"
+    private const val PROD_BASE_URL = "https://cloudcode-pa.googleapis.com/v1internal"
+    private const val QUOTA_RPC = ":retrieveUserQuotaSummary"
+    private const val MODELS_RPC = ":fetchAvailableModels"
+    private const val TIER_RPC = ":loadCodeAssist"
 
     private val loopbackHostnameVerifier = HostnameVerifier { hostname, _ ->
         hostname == "127.0.0.1" || hostname == "localhost"
@@ -437,8 +439,11 @@ object CloudCodeQuotaService {
                 val isArgon = isArgonModel(k, title)
                 val qi = mObj.optJSONObject("quotaInfo")
                 val qiReset = qi?.optString("resetTime")?.takeIf { it.isNotBlank() }
-                val rem = if (qi != null && qi.has("remainingFraction")) qi.optDouble("remainingFraction")
-                    else if (qi != null && qiReset != null) 0.0
+                val qiRem = if (qi != null && qi.has("remainingFraction") && !qi.isNull("remainingFraction")) {
+                    qi.optDouble("remainingFraction").takeIf { !it.isNaN() }
+                } else null
+                val rem = qiRem
+                    ?: if (qi != null && qiReset != null) 0.0
                     else if (isArgon) argonFraction
                     else if (prov == "Google") geminiFraction
                     else thirdPartyFraction
@@ -651,7 +656,8 @@ object CloudCodeQuotaService {
                         if (qi != null) {
                             val rt = if (qi.has("resetTime")) qi.optString("resetTime").takeIf { it.isNotBlank() } else null
                             val rem = when {
-                                qi.has("remainingFraction") -> qi.optDouble("remainingFraction")
+                                qi.has("remainingFraction") && !qi.isNull("remainingFraction") ->
+                                    qi.optDouble("remainingFraction").takeIf { !it.isNaN() }
                                 rt != null -> 0.0
                                 else -> null
                             }
@@ -911,7 +917,8 @@ object CloudCodeQuotaService {
                         OAuthManager.refreshTokenIfNeeded(context)
                         val token = OAuthManager.getAccessToken(context)
                         if (!token.isNullOrBlank()) {
-                            modelsRespStr = makePostRequest(MODELS_URL, token)
+                            modelsRespStr = makePostRequest("$DAILY_BASE_URL$MODELS_RPC", token)
+                                ?: makePostRequest("$PROD_BASE_URL$MODELS_RPC", token)
                         }
                     } catch (e: Exception) {
                         Log.w(TAG, "Remote fetchAvailableModels retry failed: ${e.message}")
@@ -994,24 +1001,26 @@ object CloudCodeQuotaService {
         val token = OAuthManager.getAccessToken(context)
 
         if (!token.isNullOrBlank()) {
-            try {
-                val modelsRespStr = makePostRequest(MODELS_URL, token)
-                val quotaRespStr = makePostRequest(QUOTA_URL, token)
-                if (quotaRespStr != null || modelsRespStr != null) {
-                    val summary = parseQuotaSummaryResponse(
-                        respStr = quotaRespStr ?: "{}",
-                        modelsRespStr = modelsRespStr,
-                        tier = tier,
-                        modelsFetchFailed = modelsRespStr == null,
-                        context = context
-                    )
-                    if (summary != null && summary.groups.isNotEmpty()) {
-                        Log.i(TAG, "Successfully loaded live quota from Google Cloud Code API for current token (${summary.groups.size} groups)")
-                        return@withContext summary
+            for (baseUrl in listOf(DAILY_BASE_URL, PROD_BASE_URL)) {
+                try {
+                    val modelsRespStr = makePostRequest("$baseUrl$MODELS_RPC", token)
+                    val quotaRespStr = makePostRequest("$baseUrl$QUOTA_RPC", token)
+                    if (quotaRespStr != null || modelsRespStr != null) {
+                        val summary = parseQuotaSummaryResponse(
+                            respStr = quotaRespStr ?: "{}",
+                            modelsRespStr = modelsRespStr,
+                            tier = tier,
+                            modelsFetchFailed = modelsRespStr == null,
+                            context = context
+                        )
+                        if (summary != null && summary.groups.isNotEmpty()) {
+                            Log.i(TAG, "Successfully loaded live quota from $baseUrl (${summary.groups.size} groups)")
+                            return@withContext summary
+                        }
                     }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to load live quota from $baseUrl: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to load live quota from Google Cloud Code API: ${e.message}")
             }
         }
 
@@ -1023,7 +1032,9 @@ object CloudCodeQuotaService {
         val token = OAuthManager.getAccessToken(context) ?: return@withContext null
 
         try {
-            val respStr = makePostRequest(TIER_URL, token) ?: return@withContext null
+            val respStr = makePostRequest("$DAILY_BASE_URL$TIER_RPC", token)
+                ?: makePostRequest("$PROD_BASE_URL$TIER_RPC", token)
+                ?: return@withContext null
             val json = JSONObject(respStr)
 
             var curTier = TierInfo()
