@@ -891,15 +891,6 @@ fun ChatScreen(
                             )
                         }
 
-                        IconButton(onClick = {
-                            detailsBottomSheetTab = 0
-                            showDetailsBottomSheet = true
-                        }) {
-                            SidePanelIcon(
-                                tint = if (showDetailsBottomSheet) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
                         IconButton(onClick = { showRightSetupPanel = true }) {
                             Icon(
                                 imageVector = Icons.Default.Settings,
