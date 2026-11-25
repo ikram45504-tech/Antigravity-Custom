@@ -702,7 +702,7 @@ object EngineExecutor {
             }
             GitHubAuthManager.syncGitCredentials(context)
         } catch (e: Exception) {
-            AppLogger.w("EngineExecutor", "Failed ensuring git config/credentials: ${e.message}")
+            AppLogger.d("EngineExecutor", "Failed ensuring git config/credentials: ${e.message}")
         }
     }
 
