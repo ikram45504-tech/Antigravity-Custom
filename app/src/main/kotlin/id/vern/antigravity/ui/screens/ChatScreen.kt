@@ -179,6 +179,8 @@ fun ChatScreen(
     val userEmail by viewModel.userEmail.collectAsStateWithLifecycle()
     val userName by viewModel.userName.collectAsStateWithLifecycle()
     val userPicture by viewModel.userPicture.collectAsStateWithLifecycle()
+    val accounts by viewModel.accounts.collectAsStateWithLifecycle()
+    val modelLimitReachedInfo by viewModel.modelLimitReachedInfo.collectAsStateWithLifecycle()
     val isAuthenticating by viewModel.isAuthenticating.collectAsStateWithLifecycle()
     val authError by viewModel.authError.collectAsStateWithLifecycle()
     val showAuthDialog by viewModel.showGoogleSignInDialog.collectAsStateWithLifecycle()
@@ -1931,10 +1933,38 @@ fun ChatScreen(
             codeAssistTier = codeAssistTier,
             cliModels = cliModels,
             modelsErrorMessage = quotaErrorMessage,
+            activeUserEmail = userEmail,
+            accounts = accounts,
+            onSwitchAccount = { acc ->
+                viewModel.switchAccount(context, acc.id)
+                Toast.makeText(context, context.getString(R.string.account_switched_toast, acc.email), Toast.LENGTH_SHORT).show()
+            },
+            onAddGoogleAccount = {
+                viewModel.dismissModelSelector()
+                viewModel.startGoogleSignIn(context)
+            },
             onModelSelected = { model, thinking, cliId ->
                 viewModel.setModel(context, model, thinking, cliId)
             },
             onDismissRequest = { viewModel.dismissModelSelector() }
+        )
+    }
+
+    if (modelLimitReachedInfo != null) {
+        ModelLimitSwitchAccountDialog(
+            limitInfo = modelLimitReachedInfo!!,
+            activeUserEmail = userEmail,
+            accounts = accounts,
+            onSwitchAndRetry = { acc ->
+                Toast.makeText(context, context.getString(R.string.account_switched_toast, acc.email), Toast.LENGTH_SHORT).show()
+                viewModel.switchGoogleAccountAndRetry(context, acc.id, retryFailedPrompt = true)
+            },
+            onAddGoogleAccount = {
+                viewModel.dismissModelLimitPrompt()
+                viewModel.startGoogleSignIn(context)
+            },
+            onOpenModelSelector = { viewModel.showModelSelector() },
+            onDismiss = { viewModel.dismissModelLimitPrompt() }
         )
     }
 

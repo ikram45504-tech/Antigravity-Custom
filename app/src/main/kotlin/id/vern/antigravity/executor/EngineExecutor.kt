@@ -294,21 +294,7 @@ object EngineExecutor {
             OAuthManager.checkAndImportExistingToken(context)
             OAuthManager.syncCompanionStateFiles(context)
 
-            val gitConfig = File(homeDir, ".gitconfig")
-            val safeLine = "[safe]\n\tdirectory = *\n"
-            val sslLine = "[http]\n\tsslCAInfo = ${certFile.absolutePath}\n"
-            if (!gitConfig.exists()) {
-                gitConfig.writeText("$safeLine\n$sslLine")
-            } else {
-                val currentConfig = gitConfig.readText()
-                if (!currentConfig.contains("directory = *")) {
-                    gitConfig.appendText("\n$safeLine")
-                }
-                if (!currentConfig.contains("sslCAInfo")) {
-                    gitConfig.appendText("\n$sslLine")
-                }
-            }
-            GitHubAuthManager.syncGitCredentials(context)
+            ensureGitEnvironmentAndCredentials(context, homeDir, certFile)
 
             val rootConfig = File(filesDir, ".gemini/config")
             val homeConfig = File(homeDir, ".gemini/config")
@@ -689,9 +675,34 @@ object EngineExecutor {
                 hostsFile.writeText("127.0.0.1 localhost\n::1 localhost ip6-localhost ip6-loopback\n", Charsets.UTF_8)
                 hostsFile.setReadable(true, false)
             }
+
+            val homeDir = File(filesDir, "home").apply { mkdirs() }
+            ensureGitEnvironmentAndCredentials(context, homeDir, certPem)
             isEnvironmentHealed = true
         } catch (e: Exception) {
             AppLogger.e("EngineExecutor", "Failed to heal environment: ${e.message}")
+        }
+    }
+
+    fun ensureGitEnvironmentAndCredentials(context: Context, homeDir: File, certFile: File) {
+        try {
+            val gitConfig = File(homeDir, ".gitconfig")
+            val safeLine = "[safe]\n\tdirectory = *\n"
+            val sslLine = "[http]\n\tsslCAInfo = ${certFile.absolutePath}\n"
+            if (!gitConfig.exists()) {
+                gitConfig.writeText("$safeLine\n$sslLine")
+            } else {
+                val currentConfig = gitConfig.readText()
+                if (!currentConfig.contains("directory = *")) {
+                    gitConfig.appendText("\n$safeLine")
+                }
+                if (!currentConfig.contains("sslCAInfo")) {
+                    gitConfig.appendText("\n$sslLine")
+                }
+            }
+            GitHubAuthManager.syncGitCredentials(context)
+        } catch (e: Exception) {
+            AppLogger.w("EngineExecutor", "Failed ensuring git config/credentials: ${e.message}")
         }
     }
 

@@ -17,6 +17,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,6 +43,8 @@ import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Difference
@@ -57,6 +60,7 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -68,6 +72,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -171,6 +176,14 @@ fun AgentDetailsBottomSheet(
     }
 
     val filesChanged by viewModel.gitChangedFiles.collectAsStateWithLifecycle()
+    val repoSummary by viewModel.gitRepoSummary.collectAsStateWithLifecycle()
+    val isGitActionRunning by viewModel.isGitActionRunning.collectAsStateWithLifecycle()
+    val gitActionStatus by viewModel.gitActionStatus.collectAsStateWithLifecycle()
+    var showCommitDialog by remember { mutableStateOf(false) }
+    var commitMessageInput by remember { mutableStateOf("") }
+    var showBranchMenu by remember { mutableStateOf(false) }
+    var showNewBranchDialog by remember { mutableStateOf(false) }
+    var newBranchInput by remember { mutableStateOf("") }
     var uploadsList by remember { mutableStateOf<List<UploadedMediaItem>>(emptyList()) }
     var skillsList by remember { mutableStateOf<List<InstalledSkillItem>>(emptyList()) }
     val artifactsList by viewModel.conversationArtifacts.collectAsStateWithLifecycle()
@@ -1001,6 +1014,146 @@ fun AgentDetailsBottomSheet(
                             }
                         }
 
+                        if (repoSummary.isGitRepo) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState())
+                                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                            ) {
+                                Box {
+                                    val branchBadge = buildString {
+                                        append(repoSummary.branch.ifBlank { "HEAD" })
+                                        if (repoSummary.aheadCount > 0) append(" ↑${repoSummary.aheadCount}")
+                                        if (repoSummary.behindCount > 0) append(" ↓${repoSummary.behindCount}")
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant,
+                                        modifier = Modifier.clickable(enabled = !isGitActionRunning) { showBranchMenu = true }
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                        ) {
+                                            Text(
+                                                text = branchBadge,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontFamily = FontFamily.Monospace,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Spacer(modifier = Modifier.width(2.dp))
+                                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                    DropdownMenu(
+                                        expanded = showBranchMenu,
+                                        onDismissRequest = { showBranchMenu = false }
+                                    ) {
+                                        repoSummary.branches.forEach { branchName ->
+                                            DropdownMenuItem(
+                                                text = { Text(branchName, fontFamily = FontFamily.Monospace, fontSize = 13.sp) },
+                                                trailingIcon = if (branchName == repoSummary.branch) {
+                                                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                                } else null,
+                                                onClick = {
+                                                    showBranchMenu = false
+                                                    viewModel.checkoutGitBranch(context, branchName) { res ->
+                                                        Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                            )
+                                        }
+                                        HorizontalDivider()
+                                        DropdownMenuItem(
+                                            text = { Text("New branch…", fontSize = 13.sp) },
+                                            leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                                            onClick = {
+                                                showBranchMenu = false
+                                                newBranchInput = ""
+                                                showNewBranchDialog = true
+                                            }
+                                        )
+                                    }
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = AntigravityBlue.copy(alpha = 0.14f),
+                                    modifier = Modifier.clickable(enabled = !isGitActionRunning) {
+                                        commitMessageInput = ""
+                                        showCommitDialog = true
+                                    }
+                                ) {
+                                    Text(
+                                        text = "Commit",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = AntigravityBlue,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                    )
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    modifier = Modifier.clickable(enabled = !isGitActionRunning) {
+                                        viewModel.pullGitChanges(context) { res ->
+                                            Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                ) {
+                                    Text(
+                                        text = "Pull",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                    )
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = AntigravityGreen.copy(alpha = 0.16f),
+                                    modifier = Modifier.clickable(enabled = !isGitActionRunning) {
+                                        viewModel.pushGitChanges(context) { res ->
+                                            Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                ) {
+                                    Text(
+                                        text = "Push",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = AntigravityGreen,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                    )
+                                }
+
+                                if (isGitActionRunning) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                }
+                            }
+
+                            if (gitActionStatus != null) {
+                                val status = gitActionStatus!!
+                                Text(
+                                    text = status.message,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (status.success) AntigravityGreen else AntigravityRed,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { viewModel.clearGitActionStatus() }
+                                        .padding(horizontal = 16.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
                         if (isReviewSearching) {
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
@@ -1400,6 +1553,77 @@ fun AgentDetailsBottomSheet(
             }
         }
     }
+    }
+
+    if (showCommitDialog) {
+        AlertDialog(
+            onDismissRequest = { showCommitDialog = false },
+            title = { Text("Commit Changes") },
+            text = {
+                OutlinedTextField(
+                    value = commitMessageInput,
+                    onValueChange = { commitMessageInput = it },
+                    label = { Text("Commit message") },
+                    minLines = 2,
+                    maxLines = 4,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val msg = commitMessageInput.trim()
+                        showCommitDialog = false
+                        viewModel.commitGitChanges(context, msg) { res ->
+                            Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    enabled = commitMessageInput.isNotBlank()
+                ) {
+                    Text("Commit All")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCommitDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showNewBranchDialog) {
+        AlertDialog(
+            onDismissRequest = { showNewBranchDialog = false },
+            title = { Text("Create & Switch Branch") },
+            text = {
+                OutlinedTextField(
+                    value = newBranchInput,
+                    onValueChange = { newBranchInput = it },
+                    label = { Text("Branch name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val branch = newBranchInput.trim()
+                        showNewBranchDialog = false
+                        viewModel.checkoutGitBranch(context, branch, createNew = true) { res ->
+                            Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    enabled = newBranchInput.isNotBlank()
+                ) {
+                    Text("Create")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNewBranchDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     if (showAllUploadsDialog) {

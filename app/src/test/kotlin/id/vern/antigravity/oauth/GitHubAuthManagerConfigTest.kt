@@ -51,4 +51,56 @@ class GitHubAuthManagerConfigTest {
         assertFalse(cleaned.contains("[credential \"https://github.com\"]"))
         assertFalse(cleaned.contains("helper = store"))
     }
+
+    @Test
+    fun `buildSyncedGitConfig replaces existing user section when switching accounts`() {
+        val existing = listOf(
+            "[safe]",
+            "\tdirectory = *",
+            "[credential \"https://github.com\"]",
+            "\thelper = store",
+            "[user]",
+            "\tname = Old User",
+            "\temail = old@example.com"
+        )
+
+        val synced = GitHubAuthManager.buildSyncedGitConfig(
+            existingLines = existing,
+            name = "New User",
+            email = "new@example.com"
+        )
+
+        assertFalse(synced.contains("Old User"))
+        assertFalse(synced.contains("old@example.com"))
+        assertTrue(synced.contains("name = New User"))
+        assertTrue(synced.contains("email = new@example.com"))
+    }
+
+    @Test
+    fun `parseScopesHeader and parseRepositoriesJson extract scopes and repo metadata`() {
+        val scopes = GitHubAuthManager.parseScopesHeader("repo, workflow, read:user ")
+        org.junit.Assert.assertEquals(listOf("repo", "workflow", "read:user"), scopes)
+
+        val repos = GitHubAuthManager.parseRepositoriesJson(
+            """
+            [
+              {
+                "id": 42,
+                "name": "Antigravity-Custom",
+                "full_name": "ikram45504-tech/Antigravity-Custom",
+                "clone_url": "https://github.com/ikram45504-tech/Antigravity-Custom.git",
+                "html_url": "https://github.com/ikram45504-tech/Antigravity-Custom",
+                "description": null,
+                "private": false,
+                "default_branch": "main",
+                "updated_at": "2026-11-25T00:00:00Z"
+              }
+            ]
+            """.trimIndent()
+        )
+        org.junit.Assert.assertEquals(1, repos.size)
+        org.junit.Assert.assertEquals("Antigravity-Custom", repos[0].name)
+        org.junit.Assert.assertEquals("", repos[0].description)
+        org.junit.Assert.assertEquals("main", repos[0].defaultBranch)
+    }
 }

@@ -143,6 +143,7 @@ import id.vern.antigravity.data.ThemePreset
 import id.vern.antigravity.data.ModelAvailability
 import id.vern.antigravity.data.AvailableModelInfo
 import id.vern.antigravity.data.SubscriptionTierType
+import id.vern.antigravity.oauth.GitHubRepoItem
 import id.vern.antigravity.oauth.StoredAccount
 import id.vern.antigravity.ui.components.LogViewer
 import id.vern.antigravity.ui.theme.AntigravityBlue
@@ -166,11 +167,23 @@ fun GitHubSettingsPage(
 ) {
     val context = LocalContext.current
     val githubAccount by viewModel.githubAccount.collectAsStateWithLifecycle()
+    val githubAccounts by viewModel.githubAccounts.collectAsStateWithLifecycle()
+    val githubVerification by viewModel.githubVerification.collectAsStateWithLifecycle()
+    val isGithubVerifying by viewModel.isGithubVerifying.collectAsStateWithLifecycle()
+    val githubRepos by viewModel.githubRepos.collectAsStateWithLifecycle()
+    val isLoadingGithubRepos by viewModel.isLoadingGithubRepos.collectAsStateWithLifecycle()
+    val githubReposError by viewModel.githubReposError.collectAsStateWithLifecycle()
+    val isGitActionRunning by viewModel.isGitActionRunning.collectAsStateWithLifecycle()
     val deviceCode by viewModel.githubDeviceCode.collectAsStateWithLifecycle()
     val isAuthenticating by viewModel.isGithubAuthenticating.collectAsStateWithLifecycle()
     val authError by viewModel.githubAuthError.collectAsStateWithLifecycle()
     var patInput by remember { mutableStateOf("") }
     var showPatOption by remember { mutableStateOf(false) }
+    var showAddAnotherAccount by remember { mutableStateOf(false) }
+    var repoSearchQuery by remember { mutableStateOf("") }
+    var repoToClone by remember { mutableStateOf<GitHubRepoItem?>(null) }
+    var cloneParentPath by remember { mutableStateOf("/storage/emulated/0/Projects") }
+    var cloneFolderName by remember { mutableStateOf("") }
     val scrollState = rememberScrollState()
 
     LaunchedEffect(Unit) {
@@ -255,23 +268,255 @@ fun GitHubSettingsPage(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Git credentials are synced to ~/.gitconfig for all repositories.",
+                            text = "Git credentials are encrypted at rest and synced to ~/.gitconfig for all repositories.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                         )
 
-                        Spacer(modifier = Modifier.height(16.dp))
+                        if (githubVerification != null) {
+                            val ver = githubVerification!!
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (ver.isValid) AntigravityGreen.copy(alpha = 0.12f) else AntigravityRed.copy(alpha = 0.12f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Text(
+                                        text = ver.message,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (ver.isValid) AntigravityGreen else AntigravityRed
+                                    )
+                                    if (ver.scopes.isNotEmpty()) {
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "Scopes: ${ver.scopes.joinToString(", ")}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedButton(
+                                onClick = { viewModel.verifyGitHubConnection(context) },
+                                enabled = !isGithubVerifying,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                if (isGithubVerifying) {
+                                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                }
+                                Text("Verify & Sync")
+                            }
+                            OutlinedButton(
+                                onClick = { showAddAnotherAccount = !showAddAnotherAccount },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(if (showAddAnotherAccount) "Close" else "Add Account")
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
                         OutlinedButton(
                             onClick = { viewModel.disconnectGitHub(context) },
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = AntigravityRed),
                             border = BorderStroke(1.dp, AntigravityRed.copy(alpha = 0.4f)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Disconnect GitHub")
+                            Text("Disconnect @${acc.login}")
                         }
                     }
                 }
-            } else {
+
+                val otherGithubAccounts = remember(githubAccounts, acc.login) {
+                    githubAccounts.filter { !it.login.equals(acc.login, ignoreCase = true) }
+                }
+                if (otherGithubAccounts.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    SettingsCard {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Switch GitHub Account",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            otherGithubAccounts.forEach { other ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { viewModel.switchGitHubAccount(context, other.login) }
+                                        .padding(vertical = 8.dp, horizontal = 6.dp)
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = other.name,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = "@${other.login}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    TextButton(onClick = { viewModel.switchGitHubAccount(context, other.login) }) {
+                                        Text("Switch")
+                                    }
+                                    IconButton(
+                                        onClick = { viewModel.removeGitHubAccount(context, other.login) },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Remove @${other.login}",
+                                            tint = AntigravityRed,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                SettingsCard {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Your Repositories",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "Browse and clone directly into your projects",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = { viewModel.loadGitHubRepositories(context) },
+                                enabled = !isLoadingGithubRepos
+                            ) {
+                                if (isLoadingGithubRepos) {
+                                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                } else {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                }
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(if (githubRepos.isEmpty()) "Load" else "Refresh")
+                            }
+                        }
+
+                        if (!githubReposError.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = githubReposError!!,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = AntigravityRed
+                            )
+                        }
+
+                        if (githubRepos.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            OutlinedTextField(
+                                value = repoSearchQuery,
+                                onValueChange = { repoSearchQuery = it },
+                                label = { Text("Filter repositories") },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            val filteredRepos = remember(githubRepos, repoSearchQuery) {
+                                githubRepos.filter {
+                                    repoSearchQuery.isBlank() ||
+                                        it.fullName.contains(repoSearchQuery, ignoreCase = true) ||
+                                        it.description.contains(repoSearchQuery, ignoreCase = true)
+                                }
+                            }
+                            filteredRepos.take(25).forEachIndexed { idx, repo ->
+                                if (idx > 0) {
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+                                }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 8.dp)
+                                ) {
+                                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = repo.fullName,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f, fill = false)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = if (repo.isPrivate) AntigravityAmber.copy(alpha = 0.16f) else AntigravityBlue.copy(alpha = 0.14f)
+                                            ) {
+                                                Text(
+                                                    text = if (repo.isPrivate) "Private" else "Public",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = if (repo.isPrivate) AntigravityAmber else AntigravityBlue,
+                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                        }
+                                        if (repo.description.isNotBlank()) {
+                                            Text(
+                                                text = repo.description,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            repoToClone = repo
+                                            cloneFolderName = repo.name
+                                        },
+                                        enabled = !isGitActionRunning,
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(15.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Clone", fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (githubAccount == null || showAddAnotherAccount) {
+                if (githubAccount != null) {
+                    Spacer(modifier = Modifier.height(14.dp))
+                }
                 SettingsCard {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
@@ -415,6 +660,61 @@ fun GitHubSettingsPage(
                 }
             }
         }
+    }
+
+    if (repoToClone != null) {
+        val targetRepo = repoToClone!!
+        AlertDialog(
+            onDismissRequest = { repoToClone = null },
+            title = { Text("Clone ${targetRepo.name}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = cloneParentPath,
+                        onValueChange = { cloneParentPath = it },
+                        label = { Text("Destination Folder") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = cloneFolderName,
+                        onValueChange = { cloneFolderName = it },
+                        label = { Text("Repository Folder Name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val parentDir = File(cloneParentPath.trim().ifBlank { "/storage/emulated/0/Projects" })
+                        val folderName = cloneFolderName.trim().ifBlank { targetRepo.name }
+                        repoToClone = null
+                        Toast.makeText(context, "Cloning ${targetRepo.name}...", Toast.LENGTH_SHORT).show()
+                        viewModel.cloneGitHubRepository(
+                            context = context,
+                            cloneUrl = targetRepo.cloneUrl,
+                            destinationParentDir = parentDir,
+                            repoName = folderName
+                        ) { result, _ ->
+                            Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
+                            if (result.success) {
+                                onBack()
+                            }
+                        }
+                    },
+                    enabled = cloneFolderName.isNotBlank()
+                ) {
+                    Text("Clone & Open")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { repoToClone = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 

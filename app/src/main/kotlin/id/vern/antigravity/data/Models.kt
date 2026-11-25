@@ -118,6 +118,13 @@ data class VoiceTurnResult(
     val isSuccess: Boolean
 )
 
+data class ModelLimitReachedInfo(
+    val modelName: String,
+    val resetText: String? = null,
+    val failedPrompt: String? = null,
+    val reason: String? = null
+)
+
 data class ChatMessage(
     val id: String = UUID.randomUUID().toString(),
     val role: MessageRole,

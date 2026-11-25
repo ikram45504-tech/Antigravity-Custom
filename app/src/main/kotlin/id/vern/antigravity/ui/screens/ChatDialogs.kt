@@ -2,6 +2,8 @@ package id.vern.antigravity.ui.screens
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -9,8 +11,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,7 +30,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import id.vern.antigravity.R
+import id.vern.antigravity.data.ModelLimitReachedInfo
+import id.vern.antigravity.oauth.StoredAccount
 import id.vern.antigravity.ui.components.DialogBlurEffect
+import id.vern.antigravity.ui.components.GoogleAccountSwitcherCard
 import id.vern.antigravity.ui.theme.AntigravityBlue
 
 @Composable
@@ -134,4 +141,57 @@ internal fun formatRelativeTime(timestamp: Long): String {
         hours < 24 -> "${hours}h"
         else -> "${days}d"
     }
+}
+
+@Composable
+internal fun ModelLimitSwitchAccountDialog(
+    limitInfo: ModelLimitReachedInfo,
+    activeUserEmail: String?,
+    accounts: List<StoredAccount>,
+    onSwitchAndRetry: (StoredAccount) -> Unit,
+    onAddGoogleAccount: () -> Unit,
+    onOpenModelSelector: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(16.dp),
+        title = {
+            DialogBlurEffect()
+            Text("Model Limit Reached", fontWeight = FontWeight.Bold)
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                val resetSuffix = limitInfo.resetText?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: ""
+                Text(
+                    text = "${limitInfo.modelName} has reached its usage limit$resetSuffix. Switch to another Google account, add a new account, or pick another model.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                GoogleAccountSwitcherCard(
+                    activeUserEmail = activeUserEmail,
+                    accounts = accounts,
+                    onSwitchAccount = onSwitchAndRetry,
+                    onAddGoogleAccount = onAddGoogleAccount,
+                    actionLabel = if (!limitInfo.failedPrompt.isNullOrBlank()) "Switch & Retry" else "Switch"
+                )
+            }
+        },
+        confirmButton = {
+            OutlinedButton(
+                shape = RoundedCornerShape(8.dp),
+                onClick = {
+                    onDismiss()
+                    onOpenModelSelector()
+                }
+            ) {
+                Text("Switch Model")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Dismiss")
+            }
+        }
+    )
 }

@@ -16,6 +16,8 @@ import id.vern.antigravity.AntigravityApp
 import id.vern.antigravity.R
 import id.vern.antigravity.oauth.GitHubAccount
 import id.vern.antigravity.oauth.GitHubDeviceCode
+import id.vern.antigravity.oauth.GitHubRepoItem
+import id.vern.antigravity.oauth.GitHubVerificationResult
 import id.vern.antigravity.data.AccentColor
 import id.vern.antigravity.data.AppearanceConfig
 import id.vern.antigravity.data.AttachedFile
@@ -32,6 +34,7 @@ import id.vern.antigravity.data.OpenTab
 import id.vern.antigravity.data.ArtifactFileItem
 import id.vern.antigravity.data.TurnFileChanges
 import id.vern.antigravity.data.VoiceTurnResult
+import id.vern.antigravity.data.ModelLimitReachedInfo
 import id.vern.antigravity.data.EngineStatus
 import id.vern.antigravity.data.ExecutionLogEntry
 import id.vern.antigravity.data.MessageRole
@@ -266,6 +269,8 @@ class AntigravityViewModel : ViewModel() {
     val voiceOnlyMode: StateFlow<Boolean> = settingsPreferencesDelegate.voiceOnlyMode
     private val mutableLatestVoiceTurnResult = MutableStateFlow<VoiceTurnResult?>(null)
     val latestVoiceTurnResult: StateFlow<VoiceTurnResult?> = mutableLatestVoiceTurnResult.asStateFlow()
+    private val mutableModelLimitReachedInfo = MutableStateFlow<ModelLimitReachedInfo?>(null)
+    val modelLimitReachedInfo: StateFlow<ModelLimitReachedInfo?> = mutableModelLimitReachedInfo.asStateFlow()
     val permissionState: StateFlow<PermissionGrantsState> = settingsPreferencesDelegate.permissionState
     val installedRulesList: StateFlow<List<RuleItem>> = settingsPreferencesDelegate.installedRulesList
     val mcpServers: StateFlow<List<McpServerItem>> = settingsPreferencesDelegate.mcpServers
@@ -279,6 +284,12 @@ class AntigravityViewModel : ViewModel() {
     val userPicture: StateFlow<String?> = authDelegate.userPicture
     val accounts: StateFlow<List<StoredAccount>> = authDelegate.accounts
     val githubAccount: StateFlow<GitHubAccount?> = authDelegate.githubAccount
+    val githubAccounts: StateFlow<List<GitHubAccount>> = authDelegate.githubAccounts
+    val githubVerification: StateFlow<GitHubVerificationResult?> = authDelegate.githubVerification
+    val isGithubVerifying: StateFlow<Boolean> = authDelegate.isGithubVerifying
+    val githubRepos: StateFlow<List<GitHubRepoItem>> = authDelegate.githubRepos
+    val isLoadingGithubRepos: StateFlow<Boolean> = authDelegate.isLoadingGithubRepos
+    val githubReposError: StateFlow<String?> = authDelegate.githubReposError
     val githubDeviceCode: StateFlow<GitHubDeviceCode?> = authDelegate.githubDeviceCode
     val isGithubAuthenticating: StateFlow<Boolean> = authDelegate.isGithubAuthenticating
     val githubAuthError: StateFlow<String?> = authDelegate.githubAuthError
@@ -387,6 +398,9 @@ class AntigravityViewModel : ViewModel() {
     val gitChangedFiles: StateFlow<List<ChangedFileItem>> = gitStatusDelegate.changedFiles
     val gitDiffCache: StateFlow<Map<String, String>> = gitStatusDelegate.diffCache
     val gitLoadingDiffs: StateFlow<Set<String>> = gitStatusDelegate.loadingDiffs
+    val gitRepoSummary: StateFlow<GitRepoSummary> = gitStatusDelegate.repoSummary
+    val isGitActionRunning: StateFlow<Boolean> = gitStatusDelegate.isGitActionRunning
+    val gitActionStatus: StateFlow<GitActionResult?> = gitStatusDelegate.gitActionStatus
 
     suspend fun fetchGitChangedFiles(context: Context, workspacePath: String?): List<ChangedFileItem> =
         gitStatusDelegate.fetchGitChangedFiles(context, workspacePath)
@@ -395,6 +409,52 @@ class AntigravityViewModel : ViewModel() {
         gitStatusDelegate.fetchGitDiff(context, workspacePath, relativePath)
 
     fun clearGitDiffCache() = gitStatusDelegate.clearDiffCache()
+    fun clearGitActionStatus() = gitStatusDelegate.clearGitActionStatus()
+
+    fun commitGitChanges(context: Context, message: String, onDone: ((GitActionResult) -> Unit)? = null) {
+        viewModelScope.launch {
+            val res = gitStatusDelegate.commitChanges(context, workspacePath.value, message)
+            onDone?.invoke(res)
+        }
+    }
+
+    fun pullGitChanges(context: Context, onDone: ((GitActionResult) -> Unit)? = null) {
+        viewModelScope.launch {
+            val res = gitStatusDelegate.pullChanges(context, workspacePath.value)
+            onDone?.invoke(res)
+        }
+    }
+
+    fun pushGitChanges(context: Context, onDone: ((GitActionResult) -> Unit)? = null) {
+        viewModelScope.launch {
+            val res = gitStatusDelegate.pushChanges(context, workspacePath.value)
+            onDone?.invoke(res)
+        }
+    }
+
+    fun checkoutGitBranch(context: Context, branchName: String, createNew: Boolean = false, onDone: ((GitActionResult) -> Unit)? = null) {
+        viewModelScope.launch {
+            val res = gitStatusDelegate.checkoutBranch(context, workspacePath.value, branchName, createNew)
+            onDone?.invoke(res)
+        }
+    }
+
+    fun cloneGitHubRepository(
+        context: Context,
+        cloneUrl: String,
+        destinationParentDir: File,
+        repoName: String,
+        onDone: ((GitActionResult, File?) -> Unit)? = null
+    ) {
+        viewModelScope.launch {
+            val (res, clonedDir) = gitStatusDelegate.cloneRepository(context, cloneUrl, destinationParentDir, repoName)
+            if (res.success && clonedDir != null) {
+                addProject(context, clonedDir.absolutePath)
+                setWorkspacePath(context, clonedDir.absolutePath)
+            }
+            onDone?.invoke(res, clonedDir)
+        }
+    }
 
     private val convIdToCliSessionId = java.util.concurrent.ConcurrentHashMap<String, String>()
 
@@ -867,7 +927,35 @@ class AntigravityViewModel : ViewModel() {
     fun showGoogleSignInDialog() = authDelegate.showGoogleSignInDialog()
     fun dismissGoogleSignInDialog() = authDelegate.dismissGoogleSignInDialog()
 
+    fun dismissModelLimitPrompt() {
+        mutableModelLimitReachedInfo.value = null
+    }
+
+    fun switchGoogleAccountAndRetry(
+        context: Context,
+        accountId: String,
+        retryFailedPrompt: Boolean = true
+    ) {
+        val pendingPrompt = mutableModelLimitReachedInfo.value?.failedPrompt
+        mutableModelLimitReachedInfo.value = null
+        switchAccount(context, accountId)
+        if (retryFailedPrompt && !pendingPrompt.isNullOrBlank()) {
+            viewModelScope.launch {
+                delay(1200)
+                sendMessage(context, pendingPrompt)
+            }
+        }
+    }
+
     fun refreshGitHubState(context: Context) = authDelegate.refreshGitHubState(context)
+    fun switchGitHubAccount(context: Context, login: String) =
+        authDelegate.switchGitHubAccount(context, login, ::addLog)
+    fun removeGitHubAccount(context: Context, login: String) =
+        authDelegate.removeGitHubAccount(context, login, ::addLog)
+    fun verifyGitHubConnection(context: Context) =
+        authDelegate.verifyGitHubConnection(context, viewModelScope, ::addLog)
+    fun loadGitHubRepositories(context: Context) =
+        authDelegate.loadGitHubRepositories(context, viewModelScope, ::addLog)
     fun startGitHubDeviceFlow(context: Context) =
         authDelegate.startGitHubDeviceFlow(context, viewModelScope, ::addLog)
     fun cancelGitHubDeviceFlow() = authDelegate.cancelGitHubDeviceFlow()
@@ -2006,6 +2094,19 @@ class AntigravityViewModel : ViewModel() {
                 }
                 override fun parseTranscriptTurn(context: Context, cliConvId: String?): ParsedTranscriptTurn =
                     this@AntigravityViewModel.parseTranscriptTurn(context, cliConvId)
+                override fun onModelLimitReached(prompt: String, reason: String) {
+                    val modelName = selectedModel.value.ifBlank { "Current model" }
+                    val (_, resetSubtext) = id.vern.antigravity.ui.components.getModelQuotaPercentage(
+                        modelName,
+                        mutableUserQuotaSummary.value
+                    )
+                    mutableModelLimitReachedInfo.value = ModelLimitReachedInfo(
+                        modelName = modelName,
+                        resetText = resetSubtext,
+                        failedPrompt = prompt.takeIf { it.isNotBlank() },
+                        reason = reason.takeIf { it.isNotBlank() }
+                    )
+                }
             }
 
             try {

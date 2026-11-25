@@ -31,6 +31,39 @@ import kotlin.coroutines.coroutineContext
  */
 class TurnExecutionDelegate {
 
+    companion object {
+        private val quotaLimitPatterns = listOf(
+            "resource_exhausted",
+            "quota exceeded",
+            "quota_exceeded",
+            "rate limit",
+            "rate_limit",
+            "too many requests",
+            "http 429",
+            "status 429",
+            "429 ",
+            "usage limit",
+            "limit reached",
+            "weekly limit",
+            "model capacity exhausted",
+            "out of quota"
+        )
+
+        fun isQuotaLimitError(exitCode: Int, outputText: String): Boolean {
+            if (outputText.isBlank()) return false
+            val lower = outputText.lowercase()
+            val matchesPattern = quotaLimitPatterns.any { lower.contains(it) }
+            if (!matchesPattern) return false
+            return exitCode != 0 ||
+                lower.contains("resource_exhausted") ||
+                lower.contains("quota exceeded") ||
+                lower.contains("rate limit") ||
+                lower.contains("weekly limit") ||
+                lower.contains("limit reached") ||
+                lower.contains("out of quota")
+        }
+    }
+
     interface Callbacks {
         fun workspacePath(): String?
         fun selectedModelCliId(): String?
@@ -48,6 +81,7 @@ class TurnExecutionDelegate {
         fun addRunningSubagent(subagent: RunningSubagent)
         fun updateSubagentConversationId(stableStepId: String, detectedSubConvId: String)
         fun parseTranscriptTurn(context: Context, cliConvId: String?): ParsedTranscriptTurn
+        fun onModelLimitReached(prompt: String, reason: String) {}
     }
 
     suspend fun runAiTurn(
@@ -518,6 +552,9 @@ class TurnExecutionDelegate {
             }
         }
         onEphemeralResult?.invoke(finalContent, exitCode == 0)
+        if (isQuotaLimitError(exitCode, finalContent)) {
+            callbacks.onModelLimitReached(prompt, finalContent.take(220))
+        }
         if (!suppressCompletionNotification) {
             PromptCompletionNotifier.notifyPromptCompleted(
                 context = context,

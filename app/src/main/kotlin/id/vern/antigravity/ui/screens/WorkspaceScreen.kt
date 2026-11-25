@@ -91,6 +91,8 @@ fun WorkspaceScreen(
     val codeAssistTier by viewModel.codeAssistTier.collectAsStateWithLifecycle()
     val cliModels by viewModel.cliModels.collectAsStateWithLifecycle()
     val quotaErrorMessage by viewModel.quotaErrorMessage.collectAsStateWithLifecycle()
+    val userEmail by viewModel.userEmail.collectAsStateWithLifecycle()
+    val accounts by viewModel.accounts.collectAsStateWithLifecycle()
     var showModelDialog by remember { mutableStateOf(false) }
 
     val openTabs by viewModel.openEditorTabs.collectAsStateWithLifecycle()
@@ -578,6 +580,16 @@ fun WorkspaceScreen(
             codeAssistTier = codeAssistTier,
             cliModels = cliModels,
             modelsErrorMessage = quotaErrorMessage,
+            activeUserEmail = userEmail,
+            accounts = accounts,
+            onSwitchAccount = { acc ->
+                viewModel.switchAccount(context, acc.id)
+                showModelDialog = false
+            },
+            onAddGoogleAccount = {
+                showModelDialog = false
+                viewModel.startGoogleSignIn(context)
+            },
             onModelSelected = { model, thinking, cliId ->
                 viewModel.setModel(context, model, thinking, cliId)
                 showModelDialog = false

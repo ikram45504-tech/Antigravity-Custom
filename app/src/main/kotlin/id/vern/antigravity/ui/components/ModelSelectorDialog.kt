@@ -23,8 +23,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import android.widget.Toast
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
@@ -38,6 +40,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -68,6 +71,7 @@ import id.vern.antigravity.data.CodeAssistTier
 import id.vern.antigravity.data.SubscriptionTierType
 import id.vern.antigravity.data.ModelAvailability
 import id.vern.antigravity.data.UserQuotaSummary
+import id.vern.antigravity.oauth.StoredAccount
 import id.vern.antigravity.service.AgyModelsService
 import id.vern.antigravity.service.CliModel
 import id.vern.antigravity.ui.theme.AntigravityBlue
@@ -197,6 +201,10 @@ fun ModelSelectorDialog(
     codeAssistTier: CodeAssistTier? = null,
     cliModels: List<CliModel> = emptyList(),
     modelsErrorMessage: String? = null,
+    activeUserEmail: String? = null,
+    accounts: List<StoredAccount> = emptyList(),
+    onSwitchAccount: ((StoredAccount) -> Unit)? = null,
+    onAddGoogleAccount: (() -> Unit)? = null,
     onModelSelected: (model: String, thinking: String, cliId: String?) -> Unit,
     onDismissRequest: () -> Unit
 ) {
@@ -494,6 +502,16 @@ fun ModelSelectorDialog(
                     else -> AntigravityGreen
                 }
 
+                if (hasZeroQuota && (onSwitchAccount != null || onAddGoogleAccount != null)) {
+                    GoogleAccountSwitcherCard(
+                        activeUserEmail = activeUserEmail,
+                        accounts = accounts,
+                        onSwitchAccount = { acc -> onSwitchAccount?.invoke(acc) },
+                        onAddGoogleAccount = { onAddGoogleAccount?.invoke() }
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                }
+
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center,
@@ -516,6 +534,23 @@ fun ModelSelectorDialog(
                             color = AntigravityBlue
                         )
                     }
+                    if (!hasZeroQuota && onAddGoogleAccount != null) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        TextButton(onClick = onAddGoogleAccount) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Switch / Add Account",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -524,8 +559,99 @@ fun ModelSelectorDialog(
         UsageLimitsDialog(
             userQuotaSummary = userQuotaSummary,
             codeAssistTier = codeAssistTier,
+            activeUserEmail = activeUserEmail,
+            accounts = accounts,
+            onSwitchAccount = onSwitchAccount,
+            onAddGoogleAccount = onAddGoogleAccount,
             onDismiss = { showUsageDialog = false }
         )
+    }
+}
+
+@Composable
+fun GoogleAccountSwitcherCard(
+    activeUserEmail: String?,
+    accounts: List<StoredAccount>,
+    onSwitchAccount: (StoredAccount) -> Unit,
+    onAddGoogleAccount: () -> Unit,
+    actionLabel: String = "Switch",
+    modifier: Modifier = Modifier
+) {
+    val otherAccounts = remember(accounts, activeUserEmail) {
+        accounts.filter { !it.email.equals(activeUserEmail, ignoreCase = true) }
+    }
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (otherAccounts.isNotEmpty()) {
+                Text(
+                    text = "Switch Google Account",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                otherAccounts.forEach { acc ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onSwitchAccount(acc) }
+                            .padding(vertical = 4.dp, horizontal = 4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = null,
+                            tint = AntigravityBlue,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = acc.name.ifBlank { acc.email },
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = acc.email,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Text(
+                            text = actionLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = AntigravityBlue
+                        )
+                    }
+                }
+            } else {
+                Text(
+                    text = "Model quota reached? Add another Google account to keep working.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            OutlinedButton(
+                onClick = onAddGoogleAccount,
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(15.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Add Another Google Account", style = MaterialTheme.typography.labelMedium)
+            }
+        }
     }
 }
 
@@ -533,6 +659,10 @@ fun ModelSelectorDialog(
 fun UsageLimitsDialog(
     userQuotaSummary: UserQuotaSummary?,
     codeAssistTier: CodeAssistTier? = null,
+    activeUserEmail: String? = null,
+    accounts: List<StoredAccount> = emptyList(),
+    onSwitchAccount: ((StoredAccount) -> Unit)? = null,
+    onAddGoogleAccount: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -650,6 +780,21 @@ fun UsageLimitsDialog(
                         groups.forEach { group ->
                             QuotaGroupCard(group = group)
                         }
+                    }
+
+                    if (onSwitchAccount != null || onAddGoogleAccount != null) {
+                        GoogleAccountSwitcherCard(
+                            activeUserEmail = activeUserEmail,
+                            accounts = accounts,
+                            onSwitchAccount = { acc ->
+                                onSwitchAccount?.invoke(acc)
+                                onDismiss()
+                            },
+                            onAddGoogleAccount = {
+                                onAddGoogleAccount?.invoke()
+                                onDismiss()
+                            }
+                        )
                     }
                 }
             }

@@ -9,6 +9,8 @@ import id.vern.antigravity.oauth.GitHubAccount
 import id.vern.antigravity.oauth.GitHubAuthManager
 import id.vern.antigravity.oauth.GitHubDeviceCode
 import id.vern.antigravity.oauth.GitHubPollResult
+import id.vern.antigravity.oauth.GitHubRepoItem
+import id.vern.antigravity.oauth.GitHubVerificationResult
 import id.vern.antigravity.oauth.StoredAccount
 import id.vern.antigravity.oauth.AccountManager
 import id.vern.antigravity.oauth.OAuthManager
@@ -52,6 +54,24 @@ class AuthDelegate {
 
     private val mutableGithubAccount = MutableStateFlow<GitHubAccount?>(null)
     val githubAccount: StateFlow<GitHubAccount?> = mutableGithubAccount.asStateFlow()
+
+    private val mutableGithubAccounts = MutableStateFlow<List<GitHubAccount>>(emptyList())
+    val githubAccounts: StateFlow<List<GitHubAccount>> = mutableGithubAccounts.asStateFlow()
+
+    private val mutableGithubVerification = MutableStateFlow<GitHubVerificationResult?>(null)
+    val githubVerification: StateFlow<GitHubVerificationResult?> = mutableGithubVerification.asStateFlow()
+
+    private val mutableIsGithubVerifying = MutableStateFlow(false)
+    val isGithubVerifying: StateFlow<Boolean> = mutableIsGithubVerifying.asStateFlow()
+
+    private val mutableGithubRepos = MutableStateFlow<List<GitHubRepoItem>>(emptyList())
+    val githubRepos: StateFlow<List<GitHubRepoItem>> = mutableGithubRepos.asStateFlow()
+
+    private val mutableIsLoadingGithubRepos = MutableStateFlow(false)
+    val isLoadingGithubRepos: StateFlow<Boolean> = mutableIsLoadingGithubRepos.asStateFlow()
+
+    private val mutableGithubReposError = MutableStateFlow<String?>(null)
+    val githubReposError: StateFlow<String?> = mutableGithubReposError.asStateFlow()
 
     private val mutableGithubDeviceCode = MutableStateFlow<GitHubDeviceCode?>(null)
     val githubDeviceCode: StateFlow<GitHubDeviceCode?> = mutableGithubDeviceCode.asStateFlow()
@@ -351,6 +371,61 @@ class AuthDelegate {
 
     fun refreshGitHubState(context: Context) {
         mutableGithubAccount.value = GitHubAuthManager.getAccount(context)
+        mutableGithubAccounts.value = GitHubAuthManager.getAccounts(context)
+    }
+
+    fun switchGitHubAccount(context: Context, login: String, onLog: (String, String) -> Unit) {
+        if (GitHubAuthManager.switchAccount(context, login)) {
+            refreshGitHubState(context)
+            mutableGithubVerification.value = null
+            mutableGithubRepos.value = emptyList()
+            onLog("GitHub", "Switched GitHub account to @$login")
+            Toast.makeText(context, "Switched GitHub to @$login", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun removeGitHubAccount(context: Context, login: String, onLog: (String, String) -> Unit) {
+        if (GitHubAuthManager.removeAccount(context, login)) {
+            refreshGitHubState(context)
+            mutableGithubVerification.value = null
+            mutableGithubRepos.value = emptyList()
+            onLog("GitHub", "Removed GitHub account @$login")
+            Toast.makeText(context, "Removed @$login", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun verifyGitHubConnection(context: Context, scope: CoroutineScope, onLog: (String, String, Boolean) -> Unit) {
+        if (mutableIsGithubVerifying.value) return
+        mutableIsGithubVerifying.value = true
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                GitHubAuthManager.syncGitCredentials(context)
+                GitHubAuthManager.verifyConnection(context)
+            }
+            mutableGithubVerification.value = result
+            mutableIsGithubVerifying.value = false
+            onLog("GitHub", result.message, !result.isValid)
+        }
+    }
+
+    fun loadGitHubRepositories(context: Context, scope: CoroutineScope, onLog: (String, String, Boolean) -> Unit) {
+        val token = GitHubAuthManager.getAccount(context)?.accessToken ?: return
+        if (mutableIsLoadingGithubRepos.value) return
+        mutableIsLoadingGithubRepos.value = true
+        mutableGithubReposError.value = null
+        scope.launch {
+            val res = withContext(Dispatchers.IO) {
+                GitHubAuthManager.fetchUserRepositories(token)
+            }
+            res.onSuccess { list ->
+                mutableGithubRepos.value = list
+                onLog("GitHub", "Loaded ${list.size} repositories", false)
+            }.onFailure { err ->
+                mutableGithubReposError.value = err.message ?: "Failed to load repositories"
+                onLog("GitHub", "Repo load failed: ${err.message}", true)
+            }
+            mutableIsLoadingGithubRepos.value = false
+        }
     }
 
     fun startGitHubDeviceFlow(
@@ -386,6 +461,8 @@ class AuthDelegate {
                             GitHubAuthManager.saveAccount(context, poll.account)
                         }
                         mutableGithubAccount.value = poll.account
+                        mutableGithubAccounts.value = GitHubAuthManager.getAccounts(context)
+                        mutableGithubVerification.value = null
                         mutableGithubDeviceCode.value = null
                         mutableIsGithubAuthenticating.value = false
                         mutableGithubAuthError.value = null
@@ -454,6 +531,8 @@ class AuthDelegate {
                     GitHubAuthManager.saveAccount(context, account)
                 }
                 mutableGithubAccount.value = account
+                mutableGithubAccounts.value = GitHubAuthManager.getAccounts(context)
+                mutableGithubVerification.value = null
                 mutableIsGithubAuthenticating.value = false
                 onLog("GitHub", "Connected GitHub account @${account.login} via PAT", false)
                 Toast.makeText(context, "Connected GitHub as @${account.login}", Toast.LENGTH_SHORT).show()
@@ -470,7 +549,9 @@ class AuthDelegate {
     ) {
         cancelGitHubDeviceFlow()
         GitHubAuthManager.signOut(context)
-        mutableGithubAccount.value = null
+        refreshGitHubState(context)
+        mutableGithubVerification.value = null
+        mutableGithubRepos.value = emptyList()
         onLog("Auth", "Disconnected GitHub account")
         Toast.makeText(context, "Disconnected GitHub account", Toast.LENGTH_SHORT).show()
     }
