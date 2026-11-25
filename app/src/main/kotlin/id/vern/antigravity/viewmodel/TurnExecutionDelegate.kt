@@ -416,6 +416,7 @@ class TurnExecutionDelegate {
             outputSb.clear()
 
             val args = buildCliArgs(
+                context = context,
                 cliId = cliId,
                 securityPreset = callbacks.securityPreset(),
                 thinkingBudget = callbacks.thinkingBudget(),
@@ -824,6 +825,7 @@ class TurnExecutionDelegate {
     }
 
     private fun buildCliArgs(
+        context: Context,
         cliId: String,
         securityPreset: String,
         thinkingBudget: String,

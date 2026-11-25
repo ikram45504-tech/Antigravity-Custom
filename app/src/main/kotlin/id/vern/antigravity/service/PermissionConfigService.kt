@@ -129,7 +129,7 @@ object PermissionConfigService {
                 val askArr = JSONArray()
                 askSet.forEach { askArr.put(it) }
                 val denyArr = JSONArray()
-                denyArr.forEach { denyArr.put(it) }
+                denySet.forEach { denyArr.put(it) }
 
                 val permsObj = JSONObject().apply {
                     put("allow", allowArr)
