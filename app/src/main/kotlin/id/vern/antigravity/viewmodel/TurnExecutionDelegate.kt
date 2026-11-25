@@ -57,9 +57,11 @@ class TurnExecutionDelegate {
             return exitCode != 0 ||
                 lower.contains("resource_exhausted") ||
                 lower.contains("quota exceeded") ||
-                lower.contains("rate limit") ||
-                lower.contains("weekly limit") ||
-                lower.contains("limit reached") ||
+                lower.contains("rate limit exceeded") ||
+                lower.contains("rate limit reached") ||
+                lower.contains("weekly limit reached") ||
+                lower.contains("usage limit reached") ||
+                lower.contains("model capacity exhausted") ||
                 lower.contains("out of quota")
         }
     }
