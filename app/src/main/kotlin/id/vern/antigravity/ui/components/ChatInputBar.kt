@@ -266,25 +266,32 @@ fun ChatInputBar(
         }
     }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "AgentCardAurora")
-    val rotationDegrees by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 10000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "AuroraRotation"
-    )
-    val pulseGlow by infiniteTransition.animateFloat(
-        initialValue = 0.88f,
-        targetValue = 1.05f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 3500, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "AuroraPulse"
-    )
+    val rotationDegrees: Float
+    val pulseGlow: Float
+    if (isExecuting) {
+        val infiniteTransition = rememberInfiniteTransition(label = "AgentCardAurora")
+        rotationDegrees = infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 10000, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "AuroraRotation"
+        ).value
+        pulseGlow = infiniteTransition.animateFloat(
+            initialValue = 0.88f,
+            targetValue = 1.05f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 3500, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "AuroraPulse"
+        ).value
+    } else {
+        rotationDegrees = 0f
+        pulseGlow = 1f
+    }
 
     val rotationMatrix = remember { android.graphics.Matrix() }
     val borderStrokePaint = remember {
@@ -1110,59 +1117,61 @@ fun ChatInputBar(
                 .padding(horizontal = 14.dp, vertical = 6.dp),
             contentAlignment = Alignment.Center
         ) {
-            val surfaceColor = MaterialTheme.colorScheme.surfaceContainerHigh
-            val isDark = surfaceColor.luminance() < 0.5f
-            val baseAlpha = (if (isDark) 0.52f else 0.40f) * (if (isExecuting) 1.25f else 1.0f)
+            if (isExecuting) {
+                val surfaceColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                val isDark = surfaceColor.luminance() < 0.5f
+                val baseAlpha = (if (isDark) 0.52f else 0.40f) * 1.25f
 
-            Canvas(
-                modifier = Modifier
-                    .matchParentSize()
-                    .then(
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            Modifier.blur(radius = 24.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
-                        } else {
-                            Modifier
-                        }
-                    )
-            ) {
-                val w = size.width
-                val h = size.height
-                val cx = w / 2f
-                val cy = h / 2f
+                Canvas(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .then(
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                Modifier.blur(radius = 24.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                            } else {
+                                Modifier
+                            }
+                        )
+                ) {
+                    val w = size.width
+                    val h = size.height
+                    val cx = w / 2f
+                    val cy = h / 2f
 
-                val rx = (w / 2f) * 0.94f
-                val ry = (h / 2f) * 0.88f
-                val spotRadius = maxOf(h * 0.95f, 65.dp.toPx()) * pulseGlow
+                    val rx = (w / 2f) * 0.94f
+                    val ry = (h / 2f) * 0.88f
+                    val spotRadius = maxOf(h * 0.95f, 65.dp.toPx()) * pulseGlow
 
-                val glowNodes = listOf(
-                    Pair(Color(0xFF4285F4), 0f),
-                    Pair(Color(0xFF8B5CF6), 60f),
-                    Pair(Color(0xFFEA4335), 120f),
-                    Pair(Color(0xFFFBBC05), 180f),
-                    Pair(Color(0xFF34A853), 240f),
-                    Pair(Color(0xFF24C6DC), 300f)
-                )
-
-                for ((color, angleOffset) in glowNodes) {
-                    val rad = (rotationDegrees + angleOffset) * (Math.PI.toFloat() / 180f)
-                    val px = cx + rx * cos(rad)
-                    val py = cy + ry * sin(rad)
-
-                    val radialBrush = Brush.radialGradient(
-                        colors = listOf(
-                            color.copy(alpha = (baseAlpha * pulseGlow).coerceIn(0f, 1f)),
-                            color.copy(alpha = (baseAlpha * 0.45f * pulseGlow).coerceIn(0f, 1f)),
-                            Color.Transparent
-                        ),
-                        center = Offset(px, py),
-                        radius = spotRadius
+                    val glowNodes = listOf(
+                        Pair(Color(0xFF4285F4), 0f),
+                        Pair(Color(0xFF8B5CF6), 60f),
+                        Pair(Color(0xFFEA4335), 120f),
+                        Pair(Color(0xFFFBBC05), 180f),
+                        Pair(Color(0xFF34A853), 240f),
+                        Pair(Color(0xFF24C6DC), 300f)
                     )
 
-                    drawCircle(
-                        brush = radialBrush,
-                        radius = spotRadius,
-                        center = Offset(px, py)
-                    )
+                    for ((color, angleOffset) in glowNodes) {
+                        val rad = (rotationDegrees + angleOffset) * (Math.PI.toFloat() / 180f)
+                        val px = cx + rx * cos(rad)
+                        val py = cy + ry * sin(rad)
+
+                        val radialBrush = Brush.radialGradient(
+                            colors = listOf(
+                                color.copy(alpha = (baseAlpha * pulseGlow).coerceIn(0f, 1f)),
+                                color.copy(alpha = (baseAlpha * 0.45f * pulseGlow).coerceIn(0f, 1f)),
+                                Color.Transparent
+                            ),
+                            center = Offset(px, py),
+                            radius = spotRadius
+                        )
+
+                        drawCircle(
+                            brush = radialBrush,
+                            radius = spotRadius,
+                            center = Offset(px, py)
+                        )
+                    }
                 }
             }
 
@@ -1171,38 +1180,44 @@ fun ChatInputBar(
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .drawWithContent {
-                        drawContent()
+                    .then(
+                        if (isExecuting) {
+                            Modifier.drawWithContent {
+                                drawContent()
 
-                        val strokeWidth = 1.35.dp.toPx()
-                        val halfStroke = strokeWidth / 2f
-                        val cornerRadius = 20.dp.toPx()
+                                val strokeWidth = 1.35.dp.toPx()
+                                val halfStroke = strokeWidth / 2f
+                                val cornerRadius = 20.dp.toPx()
 
-                        val sweepShader = android.graphics.SweepGradient(
-                            size.width / 2f,
-                            size.height / 2f,
-                            AuroraColorInts,
-                            null
-                        )
-                        rotationMatrix.reset()
-                        rotationMatrix.postRotate(rotationDegrees, size.width / 2f, size.height / 2f)
-                        sweepShader.setLocalMatrix(rotationMatrix)
+                                val sweepShader = android.graphics.SweepGradient(
+                                    size.width / 2f,
+                                    size.height / 2f,
+                                    AuroraColorInts,
+                                    null
+                                )
+                                rotationMatrix.reset()
+                                rotationMatrix.postRotate(rotationDegrees, size.width / 2f, size.height / 2f)
+                                sweepShader.setLocalMatrix(rotationMatrix)
 
-                        borderStrokePaint.asFrameworkPaint().strokeWidth = strokeWidth
-                        borderStrokePaint.asFrameworkPaint().shader = sweepShader
+                                borderStrokePaint.asFrameworkPaint().strokeWidth = strokeWidth
+                                borderStrokePaint.asFrameworkPaint().shader = sweepShader
 
-                        drawIntoCanvas { canvas ->
-                            canvas.drawRoundRect(
-                                left = halfStroke,
-                                top = halfStroke,
-                                right = size.width - halfStroke,
-                                bottom = size.height - halfStroke,
-                                radiusX = cornerRadius - halfStroke,
-                                radiusY = cornerRadius - halfStroke,
-                                paint = borderStrokePaint
-                            )
+                                drawIntoCanvas { canvas ->
+                                    canvas.drawRoundRect(
+                                        left = halfStroke,
+                                        top = halfStroke,
+                                        right = size.width - halfStroke,
+                                        bottom = size.height - halfStroke,
+                                        radiusX = cornerRadius - halfStroke,
+                                        radiusY = cornerRadius - halfStroke,
+                                        paint = borderStrokePaint
+                                    )
+                                }
+                            }
+                        } else {
+                            Modifier
                         }
-                    },
+                    ),
                 tonalElevation = 2.dp
             ) {
             Column(
