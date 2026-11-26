@@ -611,7 +611,11 @@ class TurnExecutionDelegate {
                         }
                     }
                 } else if (trimmed.isNotEmpty()) {
-                    if (!trimmed.startsWith("Get:") && !trimmed.startsWith("#") && !trimmed.startsWith("Unpacking")) {
+                    val isModeFallbackWarning = trimmed.startsWith("warning: --mode ", ignoreCase = true) ||
+                        trimmed.equals("continuing in the default mode.", ignoreCase = true)
+                    if (isModeFallbackWarning) {
+                        TerminalSessionManager.appendAgyLine(line)
+                    } else if (!trimmed.startsWith("Get:") && !trimmed.startsWith("#") && !trimmed.startsWith("Unpacking")) {
                         TerminalSessionManager.appendAgyLine(line)
                         outputSb.append(line).append("\n")
                         val now = System.currentTimeMillis()
