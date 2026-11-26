@@ -417,6 +417,7 @@ class TurnExecutionDelegate {
 
         val isRefreshingFileChanges = AtomicBoolean(false)
         var liveFileChangesJob: Job? = null
+        val turnCoroutineContext = coroutineContext
 
         while (autoContinue && currentTurn < maxAutoTurns && coroutineContext.isActive) {
             currentTurn++
@@ -537,7 +538,7 @@ class TurnExecutionDelegate {
                                                 !ephemeralVoiceOnly &&
                                                 isRefreshingFileChanges.compareAndSet(false, true)
                                             ) {
-                                                liveFileChangesJob = CoroutineScope(coroutineContext + Dispatchers.IO).launch {
+                                                liveFileChangesJob = CoroutineScope(turnCoroutineContext + Dispatchers.IO).launch {
                                                     try {
                                                         val liveChanges = computeTurnFileChanges(context, callbacks.workspacePath())
                                                         if (liveChanges != null) {
