@@ -25,8 +25,8 @@ android {
         applicationId = "id.ikram.antigravity"
         minSdk = 26
         targetSdk = 28
-        versionCode = 22
-        versionName = "1.0.21"
+        versionCode = 23
+        versionName = "1.0.22"
 
         vectorDrawables {
             useSupportLibrary = true
@@ -67,22 +67,27 @@ android {
 
     fun envOrNull(name: String): String? = System.getenv(name)?.takeIf { it.isNotBlank() }
 
+    val resolvedStorePassword = localProperties.getProperty("signing.storePassword")
+        ?: (project.findProperty("storePassword") as String?)
+        ?: envOrNull("SIGNING_STORE_PASSWORD")
+    val resolvedKeyAlias = localProperties.getProperty("signing.keyAlias")
+        ?: (project.findProperty("alias") as String?)
+        ?: envOrNull("SIGNING_KEY_ALIAS")
+    val resolvedKeyPassword = localProperties.getProperty("signing.keyPassword")
+        ?: (project.findProperty("keyPassword") as String?)
+        ?: envOrNull("SIGNING_KEY_PASSWORD")
+    val hasReleaseSigning = resolvedKeystore != null && resolvedKeystore.exists() &&
+        !resolvedStorePassword.isNullOrBlank() &&
+        !resolvedKeyAlias.isNullOrBlank() &&
+        !resolvedKeyPassword.isNullOrBlank()
+
     signingConfigs {
         create("release") {
-            if (resolvedKeystore != null && resolvedKeystore.exists()) {
+            if (hasReleaseSigning) {
                 storeFile = resolvedKeystore
-                storePassword = localProperties.getProperty("signing.storePassword")
-                    ?: (project.findProperty("storePassword") as String?)
-                    ?: envOrNull("SIGNING_STORE_PASSWORD")
-                    ?: "antigravity123"
-                keyAlias = localProperties.getProperty("signing.keyAlias")
-                    ?: (project.findProperty("alias") as String?)
-                    ?: envOrNull("SIGNING_KEY_ALIAS")
-                    ?: "antigravity"
-                keyPassword = localProperties.getProperty("signing.keyPassword")
-                    ?: (project.findProperty("keyPassword") as String?)
-                    ?: envOrNull("SIGNING_KEY_PASSWORD")
-                    ?: "antigravity123"
+                storePassword = resolvedStorePassword
+                keyAlias = resolvedKeyAlias
+                keyPassword = resolvedKeyPassword
                 enableV1Signing = true
                 enableV2Signing = true
                 enableV3Signing = true
@@ -94,20 +99,19 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            val releaseSigning = signingConfigs.getByName("release")
-            signingConfig = if (releaseSigning.storeFile != null && releaseSigning.storeFile!!.exists()) {
-                releaseSigning
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
             } else {
-                signingConfigs.getByName("debug")
+                logger.warn("Release signing keystore/credentials not configured; falling back to debug signing.")
+                signingConfig = signingConfigs.getByName("debug")
             }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         debug {
             isMinifyEnabled = false
             isShrinkResources = false
-            val releaseSigning = signingConfigs.getByName("release")
-            if (releaseSigning.storeFile != null && releaseSigning.storeFile!!.exists()) {
-                signingConfig = releaseSigning
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
             }
         }
     }

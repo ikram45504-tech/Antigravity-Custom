@@ -33,6 +33,8 @@ class SystemGatewayServer(
         private const val TAG = "SystemGateway"
         const val TOKEN_HEADER = "X-Gateway-Token"
         const val TOKEN_FILE_NAME = ".gateway_token"
+        const val MAX_CONTENT_LENGTH_BYTES = 1_048_576 // 1 MB
+        private const val CLIENT_SO_TIMEOUT_MS = 5_000
     }
 
     private val executor = Executors.newFixedThreadPool(3)
@@ -97,6 +99,7 @@ class SystemGatewayServer(
     private fun handleClient(socket: Socket) {
         socket.use { client ->
             try {
+                client.soTimeout = CLIENT_SO_TIMEOUT_MS
                 val reader = BufferedReader(InputStreamReader(client.getInputStream(), Charsets.UTF_8))
                 val firstLine = reader.readLine() ?: return
                 val parts = firstLine.split(" ")
@@ -108,25 +111,29 @@ class SystemGatewayServer(
                 var headerLine = reader.readLine()
                 while (!headerLine.isNullOrEmpty()) {
                     if (headerLine.startsWith("Content-Length:", ignoreCase = true)) {
-                        contentLength = headerLine.substringAfter(":").trim().toIntOrNull() ?: 0
+                        contentLength = headerLine.substringAfter(":").trim().toIntOrNull() ?: -1
                     } else if (headerLine.startsWith("$TOKEN_HEADER:", ignoreCase = true)) {
                         providedToken = headerLine.substringAfter(":").trim()
                     }
                     headerLine = reader.readLine()
                 }
 
-                val body = if (contentLength > 0) {
-                    val buffer = CharArray(contentLength)
-                    var read = 0
-                    while (read < contentLength) {
-                        val n = reader.read(buffer, read, contentLength - read)
-                        if (n == -1) break
-                        read += n
-                    }
-                    String(buffer, 0, read)
-                } else ""
-
-                val (statusLine, responseJson) = routeRequest(rawPath, body, providedToken)
+                val lengthError = validateContentLength(contentLength)
+                val (statusLine, responseJson) = if (lengthError != null) {
+                    lengthError
+                } else {
+                    val body = if (contentLength > 0) {
+                        val buffer = CharArray(contentLength)
+                        var read = 0
+                        while (read < contentLength) {
+                            val n = reader.read(buffer, read, contentLength - read)
+                            if (n == -1) break
+                            read += n
+                        }
+                        String(buffer, 0, read)
+                    } else ""
+                    routeRequest(rawPath, body, providedToken)
+                }
                 val responseBytes = responseJson.toString().toByteArray(Charsets.UTF_8)
 
                 val out = client.getOutputStream()
@@ -142,6 +149,14 @@ class SystemGatewayServer(
             } catch (e: Exception) {
                 Log.w(TAG, "Gateway client handle error: ${e.message}")
             }
+        }
+    }
+
+    internal fun validateContentLength(contentLength: Int): Pair<String, JSONObject>? {
+        return when {
+            contentLength < 0 -> "HTTP/1.1 400 Bad Request" to JSONObject().put("ok", false).put("error", "Invalid Content-Length")
+            contentLength > MAX_CONTENT_LENGTH_BYTES -> "HTTP/1.1 413 Payload Too Large" to JSONObject().put("ok", false).put("error", "Payload too large")
+            else -> null
         }
     }
 

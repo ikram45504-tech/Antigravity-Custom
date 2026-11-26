@@ -354,9 +354,11 @@ fun CodeEditor(
                                 factory = { ctx ->
                                     PreviewWebView(ctx).apply {
                                         settings.javaScriptEnabled = true
-                                        settings.domStorageEnabled = true
-                                        settings.allowFileAccess = true
-                                        settings.allowContentAccess = true
+                                        settings.domStorageEnabled = false
+                                        settings.allowFileAccess = false
+                                        settings.allowContentAccess = false
+                                        settings.allowFileAccessFromFileURLs = false
+                                        settings.allowUniversalAccessFromFileURLs = false
                                         settings.useWideViewPort = true
                                         settings.loadWithOverviewMode = true
                                         settings.builtInZoomControls = false
@@ -480,9 +482,30 @@ fun CodeEditor(
                                             <body>
                                             <div id="content"></div>
                                             <script>
+                                              function sanitizeRenderedHtml(html) {
+                                                const tpl = document.createElement('template');
+                                                tpl.innerHTML = html;
+                                                const blockedTags = tpl.content.querySelectorAll('script, iframe, object, embed, form, meta, base');
+                                                blockedTags.forEach(el => el.remove());
+                                                const all = tpl.content.querySelectorAll('*');
+                                                all.forEach(el => {
+                                                  for (const attr of Array.from(el.attributes)) {
+                                                    const name = attr.name.toLowerCase();
+                                                    const val = (attr.value || '').replace(/\s+/g, '').toLowerCase();
+                                                    if (name.startsWith('on')) {
+                                                      el.removeAttribute(attr.name);
+                                                    } else if ((name === 'href' || name === 'src' || name === 'xlink:href' || name === 'action') &&
+                                                        (val.startsWith('javascript:') || val.startsWith('vbscript:') || val.startsWith('data:text/html'))) {
+                                                      el.removeAttribute(attr.name);
+                                                    }
+                                                  }
+                                                });
+                                                return tpl.innerHTML;
+                                              }
                                               try {
                                                 const raw = $escapedMarkdown;
-                                                document.getElementById('content').innerHTML = (typeof marked !== 'undefined' && marked.parse) ? marked.parse(raw) : raw;
+                                                const rendered = (typeof marked !== 'undefined' && marked.parse) ? marked.parse(raw) : raw;
+                                                document.getElementById('content').innerHTML = sanitizeRenderedHtml(rendered);
                                               } catch (e) {
                                                 document.getElementById('content').innerText = e.message;
                                               }
@@ -507,10 +530,12 @@ fun CodeEditor(
                             AndroidView(
                                 factory = { ctx ->
                                     PreviewWebView(ctx).apply {
-                                        settings.javaScriptEnabled = true
-                                        settings.domStorageEnabled = true
-                                        settings.allowFileAccess = true
-                                        settings.allowContentAccess = true
+                                        settings.javaScriptEnabled = !isSvg
+                                        settings.domStorageEnabled = !isSvg
+                                        settings.allowFileAccess = !isSvg
+                                        settings.allowContentAccess = !isSvg
+                                        settings.allowFileAccessFromFileURLs = false
+                                        settings.allowUniversalAccessFromFileURLs = false
                                         settings.useWideViewPort = true
                                         settings.loadWithOverviewMode = true
                                         settings.builtInZoomControls = false
@@ -530,6 +555,10 @@ fun CodeEditor(
                                     }
                                 },
                                 update = { webView ->
+                                    webView.settings.javaScriptEnabled = !isSvg
+                                    webView.settings.domStorageEnabled = !isSvg
+                                    webView.settings.allowFileAccess = !isSvg
+                                    webView.settings.allowContentAccess = !isSvg
                                     val contentKey = "${tab.id}_${tab.file.lastModified()}_${textContent.hashCode()}"
                                     if (webView.tag != contentKey) {
                                         webView.tag = contentKey

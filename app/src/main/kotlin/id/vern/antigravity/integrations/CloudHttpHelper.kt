@@ -22,10 +22,14 @@ internal object CloudHttpHelper {
             setRequestProperty("Authorization", "Bearer $bearerToken")
             setRequestProperty("User-Agent", USER_AGENT)
         }
-        val code = conn.responseCode
-        val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-        val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-        return HttpResponseResult(statusCode = code, body = text)
+        return try {
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            HttpResponseResult(statusCode = code, body = text)
+        } finally {
+            conn.disconnect()
+        }
     }
 
     fun postJson(
@@ -44,11 +48,15 @@ internal object CloudHttpHelper {
             setRequestProperty("Authorization", "Bearer $bearerToken")
             setRequestProperty("User-Agent", USER_AGENT)
         }
-        conn.outputStream.use { it.write(jsonBody.toByteArray(Charsets.UTF_8)) }
-        val code = conn.responseCode
-        val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-        val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-        return HttpResponseResult(statusCode = code, body = text)
+        return try {
+            conn.outputStream.use { it.write(jsonBody.toByteArray(Charsets.UTF_8)) }
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            HttpResponseResult(statusCode = code, body = text)
+        } finally {
+            conn.disconnect()
+        }
     }
 
     fun extractErrorMessage(body: String, fallbackStatus: Int): String {

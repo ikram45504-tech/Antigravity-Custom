@@ -3,6 +3,7 @@ package id.vern.antigravity.oauth
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.system.Os
+import android.util.Log
 import java.io.File
 import java.security.KeyStore
 import java.util.Base64
@@ -16,6 +17,7 @@ import javax.crypto.spec.GCMParameterSpec
  * for credential vaults stored under files/.gemini/.
  */
 object EncryptedStoreCrypto {
+    private const val TAG = "EncryptedStoreCrypto"
     private const val ENC_PREFIX = "enc:v1:"
 
     fun isEncrypted(raw: String): Boolean = raw.trimStart().startsWith(ENC_PREFIX)
@@ -36,11 +38,17 @@ object EncryptedStoreCrypto {
                     .build()
             )
             keyGen.generateKey()
+        }.onFailure { err ->
+            Log.e(TAG, "AndroidKeyStore key init failed for alias=$alias: ${err.message}")
         }.getOrNull()
     }
 
     fun encryptPayload(alias: String, plainJson: String): String {
-        val key = getOrCreateAesKey(alias) ?: return plainJson
+        val key = getOrCreateAesKey(alias)
+        if (key == null) {
+            Log.w(TAG, "Falling back to 0600 plaintext storage for alias=$alias because KeyStore key is unavailable")
+            return plainJson
+        }
         return runCatching {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.ENCRYPT_MODE, key)
@@ -49,6 +57,8 @@ object EncryptedStoreCrypto {
                 cipher.doFinal(plainJson.toByteArray(Charsets.UTF_8))
             )
             "$ENC_PREFIX$ivB64:$ctB64"
+        }.onFailure { err ->
+            Log.w(TAG, "AES/GCM encryption failed for alias=$alias, falling back to 0600 plaintext: ${err.message}")
         }.getOrElse { plainJson }
     }
 

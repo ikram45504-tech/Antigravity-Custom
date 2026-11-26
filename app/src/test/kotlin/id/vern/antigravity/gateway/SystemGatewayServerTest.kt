@@ -69,4 +69,20 @@ class SystemGatewayServerTest {
         assertTrue(okUrlJson.getBoolean("ok"))
         assertEquals("https://example.com/docs", okUrlJson.getString("opened"))
     }
+
+    @Test
+    fun `validateContentLength rejects negative or oversized payloads`() {
+        val server = createServer()
+
+        assertEquals(null, server.validateContentLength(0))
+        assertEquals(null, server.validateContentLength(SystemGatewayServer.MAX_CONTENT_LENGTH_BYTES))
+
+        val negativeErr = server.validateContentLength(-1)!!
+        assertEquals("HTTP/1.1 400 Bad Request", negativeErr.first)
+        assertFalse(negativeErr.second.getBoolean("ok"))
+
+        val tooLargeErr = server.validateContentLength(SystemGatewayServer.MAX_CONTENT_LENGTH_BYTES + 1)!!
+        assertEquals("HTTP/1.1 413 Payload Too Large", tooLargeErr.first)
+        assertFalse(tooLargeErr.second.getBoolean("ok"))
+    }
 }

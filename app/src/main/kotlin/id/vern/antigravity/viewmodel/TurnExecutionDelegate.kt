@@ -20,6 +20,7 @@ import id.vern.antigravity.service.PromptCompletionNotifier
 import id.vern.antigravity.service.TerminalSessionManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -415,6 +416,7 @@ class TurnExecutionDelegate {
         }
 
         val isRefreshingFileChanges = AtomicBoolean(false)
+        var liveFileChangesJob: Job? = null
 
         while (autoContinue && currentTurn < maxAutoTurns && coroutineContext.isActive) {
             currentTurn++
@@ -535,7 +537,7 @@ class TurnExecutionDelegate {
                                                 !ephemeralVoiceOnly &&
                                                 isRefreshingFileChanges.compareAndSet(false, true)
                                             ) {
-                                                CoroutineScope(Dispatchers.IO).launch {
+                                                liveFileChangesJob = CoroutineScope(coroutineContext + Dispatchers.IO).launch {
                                                     try {
                                                         val liveChanges = computeTurnFileChanges(context, callbacks.workspacePath())
                                                         if (liveChanges != null) {
@@ -707,6 +709,9 @@ class TurnExecutionDelegate {
         } else if (authRequired) {
             callbacks.showGoogleSignInDialog()
         }
+
+        liveFileChangesJob?.cancel()
+        liveFileChangesJob?.join()
 
         val elapsedSec = ((System.currentTimeMillis() - turnStartTime) / 1000).coerceAtLeast(1)
         val durText = if (elapsedSec >= 60) "${elapsedSec / 60}m" else "${elapsedSec}s"
@@ -1528,9 +1533,48 @@ class TurnExecutionDelegate {
         return resolvedPath to requiresReview
     }
 
+    internal fun parseGitPorcelainLine(line: String): Pair<String, String>? {
+        val trimmed = line.trimEnd()
+        if (trimmed.length < 3) return null
+        val st = trimmed.substring(0, 2).trim()
+        val rawPath = trimmed.substring(2).trim().trim('"', '\'')
+        val path = if (rawPath.contains(" -> ")) rawPath.substringAfterLast(" -> ").trim('"', '\'') else rawPath
+        if (path.isBlank()) return null
+        val statusDesc = when {
+            st.contains("D") -> "D"
+            st.contains("A") || st.contains("?") -> "A"
+            else -> "M"
+        }
+        return path to statusDesc
+    }
+
+    internal fun parseGitNumstatLine(line: String): Triple<String, Int, Int>? {
+        val parts = line.trim().split(Regex("""\s+"""), limit = 3)
+        if (parts.size < 3) return null
+        val add = parts[0].toIntOrNull() ?: 0
+        val del = parts[1].toIntOrNull() ?: 0
+        val path = parts[2].trim().trim('"', '\'')
+        if (path.isBlank()) return null
+        return Triple(path, add, del)
+    }
+
     suspend fun computeTurnFileChanges(context: Context, workspacePath: String?): TurnFileChanges? = withContext(Dispatchers.IO) {
         val root = workspacePath?.let { File(it) } ?: return@withContext null
-        if (!root.exists() || !root.isDirectory || !File(root, ".git").exists()) return@withContext null
+        if (!root.exists() || !root.isDirectory) return@withContext null
+
+        val repoTopSb = StringBuilder()
+        val gitCheckExit = EngineExecutor.executeCommand(
+            context,
+            "git rev-parse --show-toplevel 2>/dev/null",
+            workingDir = root
+        ) { line, _ ->
+            if (line.isNotBlank()) repoTopSb.append(line.trim())
+        }
+        val repoRoot = repoTopSb.toString().trim()
+            .takeIf { gitCheckExit == 0 && it.isNotEmpty() }
+            ?.let { File(it) }
+            ?.takeIf { it.isDirectory }
+            ?: return@withContext null
 
         val fileList = mutableListOf<ChangedFileDetail>()
         var totalAdd = 0
@@ -1538,46 +1582,34 @@ class TurnExecutionDelegate {
 
         try {
             val statusMap = mutableMapOf<String, String>()
-            EngineExecutor.executeCommand(context, "git status --porcelain 2>/dev/null", workingDir = root) { line, _ ->
-                val trimmed = line.trim()
-                if (trimmed.length >= 3) {
-                    val st = trimmed.substring(0, 2).trim()
-                    val path = trimmed.substring(2).trim().trim('"', '\'')
-                    val statusDesc = when {
-                        st.contains("D") -> "D"
-                        st.contains("A") || st.contains("?") -> "A"
-                        else -> "M"
-                    }
+            EngineExecutor.executeCommand(context, "git status --porcelain 2>/dev/null", workingDir = repoRoot) { line, _ ->
+                parseGitPorcelainLine(line)?.let { (path, statusDesc) ->
                     statusMap[path] = statusDesc
                 }
             }
 
             val numstats = mutableListOf<Triple<String, Int, Int>>()
-            EngineExecutor.executeCommand(context, "git diff --numstat 2>/dev/null", workingDir = root) { line, _ ->
-                val parts = line.trim().split(Regex("""\s+"""))
-                if (parts.size >= 3) {
-                    val add = parts[0].toIntOrNull() ?: 0
-                    val del = parts[1].toIntOrNull() ?: 0
-                    val path = parts[2].trim().trim('"', '\'')
-                    numstats.add(Triple(path, add, del))
-                }
+            EngineExecutor.executeCommand(context, "git diff --numstat 2>/dev/null", workingDir = repoRoot) { line, _ ->
+                parseGitNumstatLine(line)?.let { numstats.add(it) }
             }
 
             val diffsMap = mutableMapOf<String, String>()
-            if (numstats.isNotEmpty() && numstats.size <= 30) {
-                val combinedDiffSb = StringBuilder()
-                EngineExecutor.executeCommand(context, "git diff -U3 2>/dev/null | head -n 1200", workingDir = root) { line, _ ->
-                    combinedDiffSb.append(line).append("\n")
-                }
-                val fullDiff = combinedDiffSb.toString()
-                if (fullDiff.isNotBlank()) {
-                    val fileBlocks = fullDiff.split(Regex("""(?=diff --git)"""))
-                    for (block in fileBlocks) {
-                        val headerMatch = Regex("""diff --git a/(.+?) b/""").find(block)
-                        if (headerMatch != null) {
-                            val p = headerMatch.groupValues[1].trim()
-                            diffsMap[p] = block.take(5000)
+            if (numstats.isNotEmpty()) {
+                for ((path, _, _) in numstats.take(30)) {
+                    val fileDiffSb = StringBuilder()
+                    val escapedPath = path.replace("'", "'\\''")
+                    EngineExecutor.executeCommand(
+                        context,
+                        "git diff -U3 -- '$escapedPath' 2>/dev/null",
+                        workingDir = repoRoot
+                    ) { line, _ ->
+                        if (fileDiffSb.length < 5000) {
+                            fileDiffSb.append(line).append("\n")
                         }
+                    }
+                    val diffStr = fileDiffSb.toString().take(5000)
+                    if (diffStr.isNotBlank()) {
+                        diffsMap[path] = diffStr
                     }
                 }
             }
