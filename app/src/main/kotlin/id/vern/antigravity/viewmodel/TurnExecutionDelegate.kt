@@ -18,12 +18,15 @@ import id.vern.antigravity.oauth.OAuthManager
 import id.vern.antigravity.service.AgyModelsService
 import id.vern.antigravity.service.PromptCompletionNotifier
 import id.vern.antigravity.service.TerminalSessionManager
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.coroutineContext
 
 /**
@@ -411,6 +414,8 @@ class TurnExecutionDelegate {
             }
         }
 
+        val isRefreshingFileChanges = AtomicBoolean(false)
+
         while (autoContinue && currentTurn < maxAutoTurns && coroutineContext.isActive) {
             currentTurn++
             outputSb.clear()
@@ -479,7 +484,7 @@ class TurnExecutionDelegate {
                                             }
                                         )
                                         val now = System.currentTimeMillis()
-                                        if (state != "ACTIVE" || now - lastStepUpdateMs > 300L) {
+                                        if (state != "ACTIVE" || parsedTool.kind == AgentStepKind.EDITED || now - lastStepUpdateMs > 300L) {
                                             lastStepUpdateMs = now
                                             val liveParsed = if (now - lastTranscriptPollMs > 3000L || state != "ACTIVE") {
                                                 lastTranscriptPollMs = now
@@ -487,6 +492,18 @@ class TurnExecutionDelegate {
                                             } else null
                                             val liveThinking = liveParsed?.thinking
                                             val liveThoughts = liveParsed?.steps?.filter { it.kind == AgentStepKind.THOUGHT }.orEmpty()
+                                            val resolvedTool = if (parsedTool.kind == AgentStepKind.EDITED && parsedTool.diff.isNullOrBlank()) {
+                                                val fallbackDiff = liveParsed?.steps
+                                                    ?.lastOrNull {
+                                                        it.kind == AgentStepKind.EDITED &&
+                                                            !it.diff.isNullOrBlank() &&
+                                                            (it.filePath == parsedTool.filePath || it.title == parsedTool.title)
+                                                    }
+                                                    ?.diff
+                                                if (!fallbackDiff.isNullOrBlank()) parsedTool.copy(diff = fallbackDiff) else parsedTool
+                                            } else {
+                                                parsedTool
+                                            }
 
                                             effectiveCallbacks.updateMessages(convId) { list ->
                                                 list.map { msg ->
@@ -496,12 +513,12 @@ class TurnExecutionDelegate {
                                                             if (it.kind == AgentStepKind.THOUGHT && !it.isCompleted) it.copy(isCompleted = true) else it
                                                         }
                                                         val existingIdx = completedSteps.indexOfFirst {
-                                                            it.id == parsedTool.id || (it.title == parsedTool.title && it.kind == parsedTool.kind)
+                                                            it.id == resolvedTool.id || (it.title == resolvedTool.title && it.kind == resolvedTool.kind)
                                                         }
                                                         val baseSteps = if (existingIdx >= 0) {
-                                                            completedSteps.toMutableList().apply { set(existingIdx, parsedTool) }
+                                                            completedSteps.toMutableList().apply { set(existingIdx, resolvedTool) }
                                                         } else {
-                                                            completedSteps + parsedTool
+                                                            completedSteps + resolvedTool
                                                         }
                                                         val updatedSteps = if (liveThoughts.isNotEmpty() && baseSteps.none { it.kind == AgentStepKind.THOUGHT }) {
                                                             liveThoughts + baseSteps
@@ -510,6 +527,27 @@ class TurnExecutionDelegate {
                                                         }
                                                         msg.copy(steps = updatedSteps, thinking = liveThinking ?: msg.thinking)
                                                     } else msg
+                                                }
+                                            }
+
+                                            if (resolvedTool.kind == AgentStepKind.EDITED &&
+                                                state != "ACTIVE" &&
+                                                !ephemeralVoiceOnly &&
+                                                isRefreshingFileChanges.compareAndSet(false, true)
+                                            ) {
+                                                CoroutineScope(Dispatchers.IO).launch {
+                                                    try {
+                                                        val liveChanges = computeTurnFileChanges(context, callbacks.workspacePath())
+                                                        if (liveChanges != null) {
+                                                            effectiveCallbacks.updateMessages(convId) { list ->
+                                                                list.map { msg ->
+                                                                    if (msg.id == assistantMsgId) msg.copy(fileChanges = liveChanges) else msg
+                                                                }
+                                                            }
+                                                        }
+                                                    } finally {
+                                                        isRefreshingFileChanges.set(false)
+                                                    }
                                                 }
                                             }
                                         }
