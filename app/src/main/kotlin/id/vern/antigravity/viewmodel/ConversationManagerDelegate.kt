@@ -72,9 +72,7 @@ class ConversationManagerDelegate {
                 val loadedMessages = loadMessagesForConversation(context, activeSummary.id)
                 saveLastActiveConversationId(context, activeSummary.id)
                 withContext(Dispatchers.Main) {
-                    if (!activeSummary.projectPath.isNullOrBlank()) {
-                        onWorkspaceChange(activeSummary.projectPath)
-                    }
+                    onWorkspaceChange(activeSummary.projectPath.orEmpty())
                     onMessagesLoaded(loadedMessages)
                 }
             } else {
@@ -105,7 +103,7 @@ class ConversationManagerDelegate {
         mutableActiveConversationId.value = null
         mutableIsConversationPinned.value = false
         onClearState()
-        if (!projectPath.isNullOrBlank()) {
+        if (projectPath != null) {
             onWorkspaceChange(projectPath)
         }
         if (context != null) {
@@ -130,9 +128,7 @@ class ConversationManagerDelegate {
         mutableActiveConversationId.value = summary.id
         mutableConversationTitle.value = summary.title
         mutableIsConversationPinned.value = summary.isPinned
-        if (!summary.projectPath.isNullOrBlank()) {
-            onWorkspaceChange(summary.projectPath)
-        }
+        onWorkspaceChange(summary.projectPath.orEmpty())
         loadMessagesJob = scope.launch(Dispatchers.IO) {
             val loaded = loadMessagesForConversation(context, summary.id)
             saveLastActiveConversationId(context, summary.id)
@@ -151,9 +147,7 @@ class ConversationManagerDelegate {
         mutableActiveConversationId.value = summary.id
         mutableConversationTitle.value = summary.title
         mutableIsConversationPinned.value = summary.isPinned
-        if (!summary.projectPath.isNullOrBlank()) {
-            onWorkspaceChange(summary.projectPath)
-        }
+        onWorkspaceChange(summary.projectPath.orEmpty())
         onLog("Conversation", "Switched to conversation: ${summary.title}")
     }
 

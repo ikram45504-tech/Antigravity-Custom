@@ -682,11 +682,7 @@ fun ChatScreen(
                                 executingConversationIds = executingConversationIds,
                                 formatRelativeTime = ::formatRelativeTime,
                                 onNewConversation = { projectPath ->
-                                    if (projectPath != null) {
-                                        viewModel.startNewConversation(context, projectPath)
-                                    } else {
-                                        viewModel.startNewConversation(context)
-                                    }
+                                    viewModel.startNewConversation(context, projectPath ?: "")
                                     showProjectChatsDropdown = false
                                 },
                                 onSelectProject = { project ->

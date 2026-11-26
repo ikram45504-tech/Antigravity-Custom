@@ -103,14 +103,15 @@ class ProjectWorkspaceDelegate {
         mutableWorkspacePath.value = path
         val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putString(AntigravityViewModel.KEY_WORKSPACE_PATH, path).apply()
-        TerminalSessionManager.currentWorkingDir = File(path)
-        onLog?.invoke("Workspace", "Active directory changed: $path")
+        TerminalSessionManager.currentWorkingDir = if (path.isNotBlank()) File(path) else null
+        onLog?.invoke(
+            "Workspace",
+            if (path.isNotBlank()) "Active directory changed: $path" else "Cleared active project workspace"
+        )
     }
 
     fun setWorkspacePathDirect(path: String) {
         mutableWorkspacePath.value = path
-        if (path.isNotBlank()) {
-            TerminalSessionManager.currentWorkingDir = File(path)
-        }
+        TerminalSessionManager.currentWorkingDir = if (path.isNotBlank()) File(path) else null
     }
 }
