@@ -355,6 +355,20 @@ private fun ProviderAccountVaultSection(
     var labelInput by remember(provider) { mutableStateOf("") }
     var tokenInput by remember(provider) { mutableStateOf("") }
     var showAccountMenu by remember { mutableStateOf(false) }
+    var wasAuthenticating by remember(provider) { mutableStateOf(false) }
+
+    LaunchedEffect(provider, isAuthenticating, authError) {
+        if (isAuthenticating) {
+            wasAuthenticating = true
+        } else if (wasAuthenticating) {
+            wasAuthenticating = false
+            if (authError.isNullOrBlank()) {
+                labelInput = ""
+                tokenInput = ""
+                showAddForm = false
+            }
+        }
+    }
 
     SettingsCard {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -508,9 +522,6 @@ private fun ProviderAccountVaultSection(
                         Button(
                             onClick = {
                                 onAddAccount(labelInput, tokenInput)
-                                labelInput = ""
-                                tokenInput = ""
-                                showAddForm = false
                             },
                             enabled = !isAuthenticating && tokenInput.isNotBlank(),
                             modifier = Modifier.weight(1f)
