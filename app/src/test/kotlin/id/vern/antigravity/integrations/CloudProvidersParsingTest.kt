@@ -1,6 +1,7 @@
 package id.vern.antigravity.integrations
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
@@ -77,6 +78,39 @@ class CloudProvidersParsingTest {
         } finally {
             tmpDir.deleteRecursively()
         }
+    }
+
+    @Test
+    fun `SupabaseApiClient verifyToken falls back to projects when organizations_read is missing`() {
+        val calls = mutableListOf<String>()
+        val result = SupabaseApiClient.verifyTokenWithFetcher { url ->
+            calls += url
+            if (url.endsWith("/organizations")) {
+                HttpResponseResult(403, """{"message":"Missing required permission(s): organizations_read"}""")
+            } else {
+                HttpResponseResult(
+                    200,
+                    """[{"id":"p1","ref":"abcd1234","name":"travelhisab-db","organization_id":"org_1","region":"ap-southeast-1","status":"ACTIVE_HEALTHY"}]"""
+                )
+            }
+        }
+        assertTrue(result.isValid)
+        assertEquals("travelhisab-db", result.displayName)
+        assertEquals("1 project(s)", result.detail)
+        assertEquals("Verified (1 project)", result.message)
+        assertEquals(2, calls.size)
+    }
+
+    @Test
+    fun `SupabaseApiClient verifyToken does not fall back on 401 unauthorized`() {
+        val calls = mutableListOf<String>()
+        val result = SupabaseApiClient.verifyTokenWithFetcher { url ->
+            calls += url
+            HttpResponseResult(401, """{"message":"Unauthorized"}""")
+        }
+        assertFalse(result.isValid)
+        assertEquals(401, result.statusCode)
+        assertEquals(1, calls.size)
     }
 
     @Test

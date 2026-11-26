@@ -8,8 +8,14 @@ object SupabaseApiClient {
     private const val BASE_URL = "https://api.supabase.com/v1"
 
     fun verifyToken(token: String): CloudVerificationResult {
+        return verifyTokenWithFetcher { url -> CloudHttpHelper.get(url, token) }
+    }
+
+    internal fun verifyTokenWithFetcher(
+        get: (String) -> HttpResponseResult
+    ): CloudVerificationResult {
         return try {
-            val res = CloudHttpHelper.get("$BASE_URL/organizations", token)
+            val res = get("$BASE_URL/organizations")
             if (res.statusCode in 200..299) {
                 val orgs = parseOrganizationsJson(res.body)
                 val label = orgs.firstOrNull()?.name ?: "Supabase Account"
@@ -20,6 +26,26 @@ object SupabaseApiClient {
                     statusCode = res.statusCode,
                     message = "Verified (${orgs.size} organization${if (orgs.size == 1) "" else "s"})"
                 )
+            } else if (res.statusCode == 403) {
+                // Project-scoped Supabase PATs (sbp_fc...) often omit organizations_read while allowing /projects.
+                val projRes = get("$BASE_URL/projects")
+                if (projRes.statusCode in 200..299) {
+                    val projects = parseProjectsJson(projRes.body)
+                    val label = projects.firstOrNull()?.name ?: "Supabase Account"
+                    CloudVerificationResult(
+                        isValid = true,
+                        displayName = label,
+                        detail = "${projects.size} project(s)",
+                        statusCode = projRes.statusCode,
+                        message = "Verified (${projects.size} project${if (projects.size == 1) "" else "s"})"
+                    )
+                } else {
+                    CloudVerificationResult(
+                        isValid = false,
+                        statusCode = projRes.statusCode,
+                        message = CloudHttpHelper.extractErrorMessage(projRes.body, projRes.statusCode)
+                    )
+                }
             } else {
                 CloudVerificationResult(
                     isValid = false,
