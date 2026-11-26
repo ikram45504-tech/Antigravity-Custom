@@ -25,8 +25,8 @@ android {
         applicationId = "id.ikram.antigravity"
         minSdk = 26
         targetSdk = 28
-        versionCode = 21
-        versionName = "1.0.20"
+        versionCode = 22
+        versionName = "1.0.21"
 
         vectorDrawables {
             useSupportLibrary = true
