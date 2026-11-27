@@ -1241,6 +1241,49 @@ fun GeneralSettingsPage(
                         }
                     }
 
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    SettingsCard {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Chat Backup & Restore",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Save or restore all project chats in /storage/emulated/0/Projects/antigravity_chat_backup.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        val count = viewModel.exportChatsBackup(context)
+                                        Toast.makeText(context, "Exported $count chat(s) to antigravity_chat_backup", Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Export Chats", fontSize = 12.sp)
+                                }
+                                Button(
+                                    onClick = {
+                                        val count = viewModel.restoreChatsBackup(context)
+                                        val msg = if (count > 0) "Restored $count chat(s)" else "No backup chats found"
+                                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Restore Chats", fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(30.dp))
                 }
             }

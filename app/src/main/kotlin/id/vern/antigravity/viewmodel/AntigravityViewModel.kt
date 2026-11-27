@@ -1199,6 +1199,15 @@ class AntigravityViewModel : ViewModel() {
         conversationManagerDelegate.saveMessagesForConversation(context, conversationId, messages, viewModelScope)
     fun loadMessagesForConversation(context: Context, conversationId: String): List<ChatMessage> =
         conversationManagerDelegate.loadMessagesForConversation(context, conversationId)
+    fun exportChatsBackup(context: Context): Int =
+        ConversationPersistence.exportChatsToDirectory(context)
+    fun restoreChatsBackup(context: Context): Int {
+        val count = ConversationPersistence.importChatsFromDirectory(context)
+        if (count > 0) {
+            loadConversationHistory(context)
+        }
+        return count
+    }
     fun loadConversationHistory(context: Context) =
         conversationManagerDelegate.loadConversationHistory(
             context = context,

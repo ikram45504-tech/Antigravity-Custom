@@ -238,4 +238,107 @@ object ConversationPersistence {
             if (file.exists()) file.delete()
         } catch (e: Exception) {}
     }
+
+    val DEFAULT_BACKUP_DIR: File
+        get() = File("/storage/emulated/0/Projects/antigravity_chat_backup")
+
+    fun exportChatsToDirectory(context: Context, targetDir: File = DEFAULT_BACKUP_DIR): Int {
+        val history = loadConversationHistory(context)
+        targetDir.mkdirs()
+        val destConvDir = File(targetDir, "conversations").apply { mkdirs() }
+        val srcConvDir = File(context.filesDir, "conversations")
+        var copied = 0
+        if (srcConvDir.isDirectory) {
+            srcConvDir.listFiles { f -> f.isFile && f.extension == "json" }?.forEach { src ->
+                runCatching {
+                    src.copyTo(File(destConvDir, src.name), overwrite = true)
+                    copied++
+                }
+            }
+        }
+        val jsonArray = JSONArray()
+        for (item in history) {
+            jsonArray.put(
+                JSONObject().apply {
+                    put("id", item.id)
+                    put("title", item.title)
+                    put("timestamp", item.timestamp)
+                    put("messageCount", item.messageCount)
+                    put("isPinned", item.isPinned)
+                    if (item.projectPath != null) put("projectPath", item.projectPath)
+                }
+            )
+        }
+        File(targetDir, "history.json").writeText(jsonArray.toString())
+        return maxOf(history.size, copied)
+    }
+
+    fun importChatsFromDirectory(context: Context, sourceDir: File = DEFAULT_BACKUP_DIR): Int {
+        if (!sourceDir.isDirectory) return 0
+        val srcConvDir = File(sourceDir, "conversations")
+        val destConvDir = File(context.filesDir, "conversations").apply { mkdirs() }
+        val importedIds = mutableSetOf<String>()
+        if (srcConvDir.isDirectory) {
+            srcConvDir.listFiles { f -> f.isFile && f.extension == "json" }?.forEach { src ->
+                runCatching {
+                    src.copyTo(File(destConvDir, src.name), overwrite = true)
+                    importedIds.add(src.nameWithoutExtension)
+                }
+            }
+        }
+
+        val importedSummaries = mutableListOf<ConversationSummary>()
+        val historyFile = File(sourceDir, "history.json")
+        if (historyFile.isFile) {
+            runCatching {
+                val arr = JSONArray(historyFile.readText())
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    val id = obj.optString("id").trim()
+                    if (id.isEmpty()) continue
+                    importedSummaries.add(
+                        ConversationSummary(
+                            id = id,
+                            title = obj.optString("title", "Restored Conversation"),
+                            timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
+                            messageCount = obj.optInt("messageCount", 0),
+                            isPinned = obj.optBoolean("isPinned", false),
+                            projectPath = if (obj.has("projectPath") && !obj.isNull("projectPath")) {
+                                obj.getString("projectPath")
+                            } else null
+                        )
+                    )
+                }
+            }
+        }
+
+        val existing = loadConversationHistory(context)
+        val mergedById = LinkedHashMap<String, ConversationSummary>()
+        existing.forEach { mergedById[it.id] = it }
+        var restoredCount = 0
+        importedSummaries.forEach { summary ->
+            if (!mergedById.containsKey(summary.id)) {
+                mergedById[summary.id] = summary
+                restoredCount++
+            }
+        }
+        importedIds.forEach { id ->
+            if (!mergedById.containsKey(id)) {
+                val msgs = loadMessagesForConversation(context, id)
+                val firstUser = msgs.firstOrNull { it.role == MessageRole.USER }?.content?.take(48).orEmpty()
+                mergedById[id] = ConversationSummary(
+                    id = id,
+                    title = firstUser.ifBlank { "Restored Conversation" },
+                    timestamp = msgs.lastOrNull()?.timestamp ?: System.currentTimeMillis(),
+                    messageCount = msgs.size,
+                    isPinned = false,
+                    projectPath = null
+                )
+                restoredCount++
+            }
+        }
+        val mergedList = mergedById.values.sortedByDescending { it.timestamp }
+        saveConversationHistory(context, mergedList)
+        return if (restoredCount > 0) restoredCount else importedIds.size
+    }
 }
