@@ -75,7 +75,7 @@ private val BULLET_PREFIX_REGEX = Regex("""^[-*+]\s+""")
 private val NUM_PREFIX_REGEX = Regex("""^\d+\.\s+""")
 private val INLINE_TOKEN_REGEX = Regex("""(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\)|(?:^|\s)/[A-Za-z][A-Za-z0-9_-]*(?=\s|$|[.,;:!?])|(?:^|\s)@[A-Za-z0-9_./-]+(?=\s|$|[.,;:!?]))""")
 
-private const val ASYNC_MARKDOWN_THRESHOLD = 2000
+private const val ASYNC_MARKDOWN_THRESHOLD = 400
 private const val MAX_CACHEABLE_MARKDOWN_LENGTH = 65536
 private val markdownElementCache = LruCache<String, List<MarkdownElement>>(64)
 private val inlineAnnotatedCache = LruCache<String, AnnotatedString>(256)
@@ -374,7 +374,18 @@ fun MarkdownText(
         val cached = remember(markdown) { markdownElementCache.get(markdown) }
         val asyncElements by produceState<List<MarkdownElement>?>(initialValue = cached, key1 = markdown) {
             value = cached ?: withContext(Dispatchers.Default) {
-                parseMarkdownCached(markdown)
+                val parsed = parseMarkdownCached(markdown)
+                // Pre-warm inline formatting cache off the main thread so composition only hits LruCache.
+                parsed.forEach { element ->
+                    when (element) {
+                        is MarkdownElement.Heading -> parseInlineMarkdownCached(element.text)
+                        is MarkdownElement.ListItem -> parseInlineMarkdownCached(element.text)
+                        is MarkdownElement.BlockQuote -> parseInlineMarkdownCached(element.text)
+                        is MarkdownElement.Paragraph -> parseInlineMarkdownCached(element.text)
+                        else -> Unit
+                    }
+                }
+                parsed
             }
         }
         asyncElements

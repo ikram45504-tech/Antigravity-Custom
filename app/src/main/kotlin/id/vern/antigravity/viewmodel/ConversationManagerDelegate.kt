@@ -6,6 +6,7 @@ import id.vern.antigravity.data.ChatMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,9 +29,14 @@ class ConversationManagerDelegate {
     val isConversationPinned: StateFlow<Boolean> = mutableIsConversationPinned.asStateFlow()
 
     private var loadMessagesJob: Job? = null
+    private val persistenceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun saveConversationHistory(context: Context) {
-        ConversationPersistence.saveConversationHistory(context, mutableConversationHistory.value)
+        val snapshot = mutableConversationHistory.value.toList()
+        val appContext = context.applicationContext ?: context
+        persistenceScope.launch {
+            ConversationPersistence.saveConversationHistory(appContext, snapshot)
+        }
     }
 
     fun saveLastActiveConversationId(context: Context, id: String?) {
