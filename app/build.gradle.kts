@@ -25,8 +25,8 @@ android {
         applicationId = "id.ikram.antigravity"
         minSdk = 26
         targetSdk = 28
-        versionCode = 24
-        versionName = "1.0.23"
+        versionCode = 25
+        versionName = "1.0.24"
 
         vectorDrawables {
             useSupportLibrary = true
@@ -57,25 +57,37 @@ android {
         }
     }
 
-    val keystoreCandidates = listOf(
-        file("release.keystore"),
-        rootProject.file("app/release.keystore"),
-        file("KuatoDev.jks"),
-        rootProject.file("app/KuatoDev.jks")
-    )
-    val resolvedKeystore = keystoreCandidates.firstOrNull { it.exists() }
-
     fun envOrNull(name: String): String? = System.getenv(name)?.takeIf { it.isNotBlank() }
 
-    val resolvedStorePassword = localProperties.getProperty("signing.storePassword")
+    val customKeystore = listOf(
+        file("KuatoDev.jks"),
+        rootProject.file("app/KuatoDev.jks")
+    ).firstOrNull { it.exists() }
+    val defaultReleaseKeystore = listOf(
+        file("release.keystore"),
+        rootProject.file("app/release.keystore")
+    ).firstOrNull { it.exists() }
+
+    val explicitStorePassword = localProperties.getProperty("signing.storePassword")
         ?: (project.findProperty("storePassword") as String?)
         ?: envOrNull("SIGNING_STORE_PASSWORD")
-    val resolvedKeyAlias = localProperties.getProperty("signing.keyAlias")
+    val explicitKeyAlias = localProperties.getProperty("signing.keyAlias")
         ?: (project.findProperty("alias") as String?)
         ?: envOrNull("SIGNING_KEY_ALIAS")
-    val resolvedKeyPassword = localProperties.getProperty("signing.keyPassword")
+    val explicitKeyPassword = localProperties.getProperty("signing.keyPassword")
         ?: (project.findProperty("keyPassword") as String?)
         ?: envOrNull("SIGNING_KEY_PASSWORD")
+
+    val hasExplicitCustomSigning = customKeystore != null &&
+        !explicitStorePassword.isNullOrBlank() &&
+        !explicitKeyAlias.isNullOrBlank() &&
+        !explicitKeyPassword.isNullOrBlank()
+
+    val resolvedKeystore = if (hasExplicitCustomSigning) customKeystore else defaultReleaseKeystore
+    val resolvedStorePassword = if (hasExplicitCustomSigning) explicitStorePassword else (explicitStorePassword ?: "antigravity123")
+    val resolvedKeyAlias = if (hasExplicitCustomSigning) explicitKeyAlias else (explicitKeyAlias ?: "antigravity")
+    val resolvedKeyPassword = if (hasExplicitCustomSigning) explicitKeyPassword else (explicitKeyPassword ?: "antigravity123")
+
     val hasReleaseSigning = resolvedKeystore != null && resolvedKeystore.exists() &&
         !resolvedStorePassword.isNullOrBlank() &&
         !resolvedKeyAlias.isNullOrBlank() &&
