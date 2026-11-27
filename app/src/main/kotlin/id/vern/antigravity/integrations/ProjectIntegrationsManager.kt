@@ -368,9 +368,11 @@ object ProjectIntegrationsManager {
                 env["SUPABASE_PROJECT_REF"] = s.projectRef
                 if (s.apiUrl.isNotBlank()) {
                     env["SUPABASE_URL"] = s.apiUrl
+                    env["VITE_SUPABASE_URL"] = s.apiUrl
                 }
                 if (s.anonKey.isNotBlank()) {
                     env["SUPABASE_ANON_KEY"] = s.anonKey
+                    env["VITE_SUPABASE_ANON_KEY"] = s.anonKey
                 }
             }
         }

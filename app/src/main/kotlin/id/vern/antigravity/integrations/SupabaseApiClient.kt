@@ -91,10 +91,12 @@ object SupabaseApiClient {
         val entries = LinkedHashMap<String, String>()
         if (apiUrl.isNotBlank()) {
             entries["NEXT_PUBLIC_SUPABASE_URL"] = apiUrl
+            entries["VITE_SUPABASE_URL"] = apiUrl
             entries["SUPABASE_URL"] = apiUrl
         }
         if (anonKey.isNotBlank()) {
             entries["NEXT_PUBLIC_SUPABASE_ANON_KEY"] = anonKey
+            entries["VITE_SUPABASE_ANON_KEY"] = anonKey
             entries["SUPABASE_ANON_KEY"] = anonKey
         }
         if (!serviceRoleKey.isNullOrBlank()) {

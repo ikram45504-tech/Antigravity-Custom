@@ -180,7 +180,7 @@ fun CloudIntegrationsSettingsPage(
             }
             val activeAccountId = selectedAccountIds[selectedProvider]
             val activeAccount = remember(providerAccounts, activeAccountId) {
-                providerAccounts.firstOrNull { it.id == activeAccountId } ?: providerAccounts.firstOrNull()
+                providerAccounts.firstOrNull { it.id == activeAccountId }
             }
 
             when (selectedProvider) {
@@ -396,7 +396,7 @@ private fun ProviderAccountVaultSection(
                 }
             }
 
-            if (activeAccount != null) {
+            if (accounts.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -410,7 +410,8 @@ private fun ProviderAccountVaultSection(
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                         ) {
                             Text(
-                                text = activeAccount.label,
+                                text = activeAccount?.label ?: "Select account...",
+                                color = if (activeAccount != null) Color.Unspecified else MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
@@ -440,28 +441,30 @@ private fun ProviderAccountVaultSection(
                         }
                     }
 
-                    OutlinedButton(
-                        onClick = { onVerifyAccount(activeAccount.id) },
-                        enabled = !isVerifying,
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        if (isVerifying) {
-                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                        } else {
-                            Text("Verify", fontSize = 12.sp)
+                    if (activeAccount != null) {
+                        OutlinedButton(
+                            onClick = { onVerifyAccount(activeAccount.id) },
+                            enabled = !isVerifying,
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            if (isVerifying) {
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                            } else {
+                                Text("Verify", fontSize = 12.sp)
+                            }
                         }
-                    }
 
-                    IconButton(
-                        onClick = { onRemoveAccount(activeAccount.id) },
-                        modifier = Modifier.size(34.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = "Remove account",
-                            tint = AntigravityRed,
-                            modifier = Modifier.size(18.dp)
-                        )
+                        IconButton(
+                            onClick = { onRemoveAccount(activeAccount.id) },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Remove account",
+                                tint = AntigravityRed,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -584,9 +587,9 @@ private fun VercelTabContent(
     val selectedTeamId by viewModel.vercelSelectedTeamId.collectAsStateWithLifecycle()
     val projects by viewModel.vercelProjects.collectAsStateWithLifecycle()
     val deploymentsMap by viewModel.vercelDeployments.collectAsStateWithLifecycle()
-    var searchQuery by remember { mutableStateOf("") }
-    var showTeamPicker by remember { mutableStateOf(false) }
-    var deploymentsDialogProject by remember { mutableStateOf<VercelProjectItem?>(null) }
+    var searchQuery by remember(effectiveProjectPath) { mutableStateOf("") }
+    var showTeamPicker by remember(effectiveProjectPath) { mutableStateOf(false) }
+    var deploymentsDialogProject by remember(effectiveProjectPath) { mutableStateOf<VercelProjectItem?>(null) }
 
     val bound = binding.vercel
     SettingsCard {
@@ -851,8 +854,8 @@ private fun SupabaseTabContent(
     resourceError: String?
 ) {
     val projects by viewModel.supabaseProjects.collectAsStateWithLifecycle()
-    var searchQuery by remember { mutableStateOf("") }
-    var includeServiceRole by remember { mutableStateOf(false) }
+    var searchQuery by remember(effectiveProjectPath) { mutableStateOf("") }
+    var includeServiceRole by remember(effectiveProjectPath) { mutableStateOf(false) }
 
     val bound = binding.supabase
     SettingsCard {
@@ -1053,9 +1056,9 @@ private fun CloudflarePagesTabContent(
     val selectedCfAccountId by viewModel.cloudflareSelectedCfAccountId.collectAsStateWithLifecycle()
     val pagesProjects by viewModel.cloudflarePagesProjects.collectAsStateWithLifecycle()
     val deploymentsMap by viewModel.cloudflarePagesDeployments.collectAsStateWithLifecycle()
-    var searchQuery by remember { mutableStateOf("") }
-    var showCfAccountPicker by remember { mutableStateOf(false) }
-    var deploymentsDialogProject by remember { mutableStateOf<CloudflarePagesProjectItem?>(null) }
+    var searchQuery by remember(effectiveProjectPath) { mutableStateOf("") }
+    var showCfAccountPicker by remember(effectiveProjectPath) { mutableStateOf(false) }
+    var deploymentsDialogProject by remember(effectiveProjectPath) { mutableStateOf<CloudflarePagesProjectItem?>(null) }
 
     val bound = binding.cloudflare
     SettingsCard {

@@ -412,6 +412,17 @@ fun ChatScreen(
         }
     }
 
+    var pendingCameraUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { saved ->
+        val capturedUri = pendingCameraUri
+        pendingCameraUri = null
+        if (saved && capturedUri != null) {
+            viewModel.addAttachment(context, capturedUri)
+        }
+    }
+
     val projectList by viewModel.projectList.collectAsStateWithLifecycle()
     val projectSortOrder by viewModel.projectSortOrder.collectAsStateWithLifecycle()
     val currentWorkspace by viewModel.workspacePath.collectAsStateWithLifecycle()
@@ -1157,6 +1168,26 @@ fun ChatScreen(
                             Toast.makeText(context, context.getString(R.string.chat_attachment_limit_reached), Toast.LENGTH_SHORT).show()
                         } else {
                             filePicker.launch("*/*")
+                        }
+                    },
+                    onCapturePhotoClick = {
+                        if (attachedFiles.size >= 5) {
+                            Toast.makeText(context, context.getString(R.string.chat_attachment_limit_reached), Toast.LENGTH_SHORT).show()
+                        } else {
+                            runCatching {
+                                val capturesDir = File(context.cacheDir, "camera_captures").apply { mkdirs() }
+                                val photoFile = File(capturesDir, "photo_${System.currentTimeMillis()}.jpg")
+                                val uri = androidx.core.content.FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.fileprovider",
+                                    photoFile
+                                )
+                                pendingCameraUri = uri
+                                cameraLauncher.launch(uri)
+                            }.onFailure { err ->
+                                pendingCameraUri = null
+                                Toast.makeText(context, err.message ?: "Unable to open camera", Toast.LENGTH_SHORT).show()
+                            }
                         }
                     },
                     onRemoveAttachment = { file -> viewModel.removeAttachment(file) },

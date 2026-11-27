@@ -112,16 +112,6 @@ class IntegrationsDelegate {
         val accounts = CloudAccountVault.getAccounts(context)
         mutableCloudAccounts.value = accounts
 
-        val currentSel = mutableSelectedAccountIds.value.toMutableMap()
-        CloudProvider.entries.forEach { provider ->
-            val providerAccounts = accounts.filter { it.provider == provider }
-            val existing = currentSel[provider]
-            if (existing == null || providerAccounts.none { it.id == existing }) {
-                currentSel[provider] = providerAccounts.firstOrNull()?.id
-            }
-        }
-        mutableSelectedAccountIds.value = currentSel
-
         val allBindings = ProjectIntegrationsManager.getAllBindings(context)
         mutableAllProjectBindings.value = allBindings.associateBy { ProjectIntegrationsManager.normalizePath(it.projectPath) }
         mutableActiveWorkspaceBinding.value = ProjectIntegrationsManager.getBindingForProject(context, activeWorkspacePath)
@@ -130,20 +120,85 @@ class IntegrationsDelegate {
             ?: mutableTargetProjectPath.value.takeIf { it.isNotBlank() }
             ?: activeWorkspacePath
         mutableTargetProjectPath.value = resolvedTarget
-        mutableTargetBinding.value = ProjectIntegrationsManager.getExactBinding(context, resolvedTarget)
+        val resolvedBinding = ProjectIntegrationsManager.getExactBinding(context, resolvedTarget)
+        mutableTargetBinding.value = resolvedBinding
+
+        val currentSel = mutableSelectedAccountIds.value.toMutableMap()
+        CloudProvider.entries.forEach { provider ->
+            val providerAccounts = accounts.filter { it.provider == provider }
+            val existing = currentSel[provider]
+            if (existing != null && providerAccounts.none { it.id == existing }) {
+                currentSel[provider] = null
+            }
+            if (currentSel[provider] == null) {
+                val boundId = boundAccountIdFor(resolvedBinding, provider)
+                if (boundId != null && providerAccounts.any { it.id == boundId }) {
+                    currentSel[provider] = boundId
+                }
+            }
+        }
+        mutableSelectedAccountIds.value = currentSel
     }
 
     fun setTargetProjectPath(context: Context, path: String, activeWorkspacePath: String) {
+        val targetChanged = ProjectIntegrationsManager.normalizePath(mutableTargetProjectPath.value) !=
+            ProjectIntegrationsManager.normalizePath(path)
         mutableTargetProjectPath.value = path
         refresh(context, activeWorkspacePath, path)
+        if (targetChanged) {
+            clearTransientProviderState()
+            syncSelectedAccountsToBinding(mutableTargetBinding.value, mutableCloudAccounts.value)
+        }
     }
 
     fun onActiveWorkspaceChanged(context: Context, newWorkspacePath: String, scope: CoroutineScope) {
+        val targetChanged = ProjectIntegrationsManager.normalizePath(mutableTargetProjectPath.value) !=
+            ProjectIntegrationsManager.normalizePath(newWorkspacePath)
         mutableTargetProjectPath.value = newWorkspacePath
         refresh(context, newWorkspacePath, newWorkspacePath)
+        if (targetChanged) {
+            clearTransientProviderState()
+            syncSelectedAccountsToBinding(mutableTargetBinding.value, mutableCloudAccounts.value)
+        }
         scope.launch(Dispatchers.IO) {
             ProjectIntegrationsManager.syncActiveWorkspaceMcp(context, newWorkspacePath)
         }
+    }
+
+    private fun boundAccountIdFor(binding: ProjectIntegrationBinding, provider: CloudProvider): String? =
+        when (provider) {
+            CloudProvider.VERCEL -> binding.vercel?.accountId
+            CloudProvider.SUPABASE -> binding.supabase?.accountId
+            CloudProvider.CLOUDFLARE -> binding.cloudflare?.accountId
+        }
+
+    private fun syncSelectedAccountsToBinding(
+        binding: ProjectIntegrationBinding,
+        accounts: List<CloudAccount>
+    ) {
+        mutableSelectedAccountIds.value = CloudProvider.entries.associateWith { provider ->
+            val boundId = boundAccountIdFor(binding, provider)
+            if (boundId != null && accounts.any { it.provider == provider && it.id == boundId }) {
+                boundId
+            } else {
+                null
+            }
+        }
+    }
+
+    private fun clearTransientProviderState() {
+        mutableVerifications.value = emptyMap()
+        mutableProviderErrors.value = emptyMap()
+        mutableAuthErrors.value = emptyMap()
+        mutableVercelTeams.value = emptyList()
+        mutableVercelSelectedTeamId.value = ""
+        mutableVercelProjects.value = emptyList()
+        mutableVercelDeployments.value = emptyMap()
+        mutableSupabaseProjects.value = emptyList()
+        mutableCloudflareAccounts.value = emptyList()
+        mutableCloudflareSelectedCfAccountId.value = ""
+        mutableCloudflarePagesProjects.value = emptyList()
+        mutableCloudflarePagesDeployments.value = emptyMap()
     }
 
     fun selectCloudAccount(provider: CloudProvider, accountId: String) {

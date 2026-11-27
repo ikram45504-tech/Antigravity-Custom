@@ -64,6 +64,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
@@ -108,12 +109,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -209,6 +212,7 @@ fun ChatInputBar(
     onSendMessage: (String) -> Unit,
     onModelSelectorClick: () -> Unit,
     onAttachFileClick: () -> Unit,
+    onCapturePhotoClick: () -> Unit = {},
     onRemoveAttachment: (AttachedFile) -> Unit,
     onVoiceInputClick: (() -> Unit)? = null,
     onStopExecution: () -> Unit = {},
@@ -240,14 +244,23 @@ fun ChatInputBar(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var inputText by remember { mutableStateOf("") }
+    var inputFieldValue by remember { mutableStateOf(TextFieldValue("")) }
+    val inputText = inputFieldValue.text
+    var showAttachMenu by remember { mutableStateOf(false) }
     var isQueuedExpanded by remember { mutableStateOf(true) }
     var isTaskRunningExpanded by remember { mutableStateOf(true) }
     var isSubagentRunningExpanded by remember { mutableStateOf(true) }
 
+    fun setInputTextWithCursorAtEnd(text: String) {
+        inputFieldValue = TextFieldValue(
+            text = text,
+            selection = TextRange(text.length)
+        )
+    }
+
     LaunchedEffect(externalInputText) {
         if (!externalInputText.isNullOrBlank()) {
-            inputText = externalInputText
+            setInputTextWithCursorAtEnd(externalInputText)
             onExternalInputTextConsumed()
         }
     }
@@ -298,7 +311,8 @@ fun ChatInputBar(
         if (result.resultCode == Activity.RESULT_OK) {
             val spokenText = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
             if (!spokenText.isNullOrBlank()) {
-                inputText = if (inputText.isBlank()) spokenText else "$inputText $spokenText"
+                val updated = if (inputText.isBlank()) spokenText else "$inputText $spokenText"
+                setInputTextWithCursorAtEnd(updated)
             }
         }
     }
@@ -363,7 +377,7 @@ fun ChatInputBar(
                                         .fillMaxWidth()
                                         .clickable {
                                             val prefix = inputText.substring(0, atIndex)
-                                            inputText = "$prefix@${item.token} "
+                                            setInputTextWithCursorAtEnd("$prefix@${item.token} ")
                                         }
                                         .padding(horizontal = 14.dp, vertical = 7.dp)
                                 ) {
@@ -432,7 +446,7 @@ fun ChatInputBar(
                                         item = item,
                                         onPick = {
                                             val prefix = inputText.substring(0, slashIndex)
-                                            inputText = "$prefix/${item.cmd} "
+                                            setInputTextWithCursorAtEnd("$prefix/${item.cmd} ")
                                         }
                                     )
                                 }
@@ -883,7 +897,7 @@ fun ChatInputBar(
                                         onClick = {
                                             val item = onEditQueuedMessage(qm.id)
                                             if (item != null) {
-                                                inputText = item.content
+                                                setInputTextWithCursorAtEnd(item.content)
                                             }
                                         },
                                         modifier = Modifier.size(28.dp)
@@ -1287,9 +1301,9 @@ fun ChatInputBar(
                     }
 
                     BasicTextField(
-                        value = inputText,
-                        onValueChange = { newText ->
-                            inputText = newText
+                        value = inputFieldValue,
+                        onValueChange = { newValue ->
+                            inputFieldValue = newValue
                         },
                         textStyle = TextStyle(
                             color = MaterialTheme.colorScheme.onSurface,
@@ -1305,7 +1319,7 @@ fun ChatInputBar(
                             onSend = {
                                 if (inputText.isNotBlank() || attachedFiles.isNotEmpty()) {
                                     val text = inputText
-                                    inputText = ""
+                                    inputFieldValue = TextFieldValue("")
                                     onSendMessage(text)
                                 }
                             }
@@ -1324,19 +1338,54 @@ fun ChatInputBar(
                 ) {
 
                     val canAddMoreAttachments = attachedFiles.size < 5
-                    Box(
-                        modifier = Modifier
-                            .requiredSize(34.dp)
-                            .clip(CircleShape)
-                            .clickable(enabled = canAddMoreAttachments) { onAttachFileClick() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = stringResource(R.string.chat_attachment_add),
-                            tint = if (canAddMoreAttachments) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
-                            modifier = Modifier.size(20.dp)
-                        )
+                    Box {
+                        Box(
+                            modifier = Modifier
+                                .requiredSize(34.dp)
+                                .clip(CircleShape)
+                                .clickable(enabled = canAddMoreAttachments) { showAttachMenu = true },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = stringResource(R.string.chat_attachment_add),
+                                tint = if (canAddMoreAttachments) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showAttachMenu,
+                            onDismissRequest = { showAttachMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.chat_attachment_take_photo)) },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.PhotoCamera,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                onClick = {
+                                    showAttachMenu = false
+                                    onCapturePhotoClick()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.chat_attachment_choose_file)) },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.AttachFile,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                onClick = {
+                                    showAttachMenu = false
+                                    onAttachFileClick()
+                                }
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.width(6.dp))
@@ -1482,7 +1531,7 @@ fun ChatInputBar(
                                 )
                                 .clickable(enabled = canSend) {
                                     val text = inputText
-                                    inputText = ""
+                                    inputFieldValue = TextFieldValue("")
                                     onSendMessage(text)
                                 },
                             contentAlignment = Alignment.Center

@@ -74,6 +74,7 @@ class ProjectIntegrationsManagerTest {
         assertEquals("cf_acc_1", env["CLOUDFLARE_ACCOUNT_ID"])
         assertEquals("app-a-pages", env["CF_PAGES_PROJECT_NAME"])
         assertTrue(!env.containsKey("SUPABASE_ACCESS_TOKEN"))
+        assertTrue(!env.containsKey("VITE_SUPABASE_URL"))
         assertTrue(ProjectIntegrationsManager.buildRuntimeEnvFromBinding(null, accountsById).isEmpty())
     }
 

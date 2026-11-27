@@ -74,6 +74,8 @@ class CloudProvidersParsingTest {
             SupabaseApiClient.writeSupabaseEnvToWorkspace(tmpDir, "https://abcd1234.supabase.co", "eyJ_anon")
             val envText = tmpDir.resolve(".env.local").readText()
             assertTrue(envText.contains("NEXT_PUBLIC_SUPABASE_URL=https://abcd1234.supabase.co"))
+            assertTrue(envText.contains("VITE_SUPABASE_URL=https://abcd1234.supabase.co"))
+            assertTrue(envText.contains("VITE_SUPABASE_ANON_KEY=eyJ_anon"))
             assertTrue(envText.contains("SUPABASE_ANON_KEY=eyJ_anon"))
         } finally {
             tmpDir.deleteRecursively()

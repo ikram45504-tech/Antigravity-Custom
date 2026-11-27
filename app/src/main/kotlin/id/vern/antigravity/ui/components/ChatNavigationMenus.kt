@@ -815,6 +815,7 @@ fun RightSystemSetupPanel(
                             SetupDestinationRow(
                                 icon = Icons.Default.Cloud,
                                 label = stringResource(R.string.settings_cloud_title),
+                                subtitle = stringResource(R.string.settings_cloud_subtitle),
                                 onClick = { onDismiss(); onOpenSettingsPage(SettingsPage.CLOUD_INTEGRATIONS) }
                             )
                         }
@@ -850,6 +851,7 @@ fun RightSystemSetupPanel(
 private fun SetupDestinationRow(
     icon: ImageVector,
     label: String,
+    subtitle: String? = null,
     onClick: () -> Unit
 ) {
     Surface(
@@ -871,14 +873,24 @@ private fun SetupDestinationRow(
                 modifier = Modifier.size(18.dp)
             )
             Spacer(modifier = Modifier.width(12.dp))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (!subtitle.isNullOrBlank()) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,

@@ -706,7 +706,10 @@
     <string name="settings_models_title">Models &amp; Quota</string>
     <string name="settings_customizations_title">Skills / Rules / MCP</string>
     <string name="settings_github_title">GitHub Integration</string>
-    <string name="settings_cloud_title">Cloud (Vercel / Supabase / Cloudflare)</string>
+    <string name="settings_cloud_title">Other Integrations</string>
+    <string name="settings_cloud_subtitle">Vercel • Supabase • CF Pages</string>
+    <string name="chat_attachment_take_photo">Take Photo</string>
+    <string name="chat_attachment_choose_file">Choose File</string>
     <string name="settings_developer_title">Developer &amp; Logs</string>
 </resources>
 

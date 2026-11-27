@@ -438,7 +438,7 @@ fun MainSettingsPage(
                 onClick = { onNavigateTo(SettingsPage.GITHUB) }
             )
             SettingsMenuRow(
-                title = "Cloud & Deploy (Vercel, Supabase, CF)",
+                title = "Other Integrations",
                 onClick = { onNavigateTo(SettingsPage.CLOUD_INTEGRATIONS) }
             )
             SettingsMenuRow(
