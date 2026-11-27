@@ -2231,13 +2231,15 @@ class AntigravityViewModel : ViewModel() {
             mutableChatMessages.value = updatedMessages
         }
 
+        val existingSummary = conversationHistory.value.find { it.id == convId }
+        val resolvedProjectPath = existingSummary?.projectPath?.takeIf { it.isNotBlank() } ?: workspacePath.value
         val currentSummary = ConversationSummary(
             id = convId,
             title = resolvedTitle,
             timestamp = System.currentTimeMillis(),
             messageCount = updatedMessages.size,
-            isPinned = if (isForeground) isConversationPinned.value else (conversationHistory.value.find { it.id == convId }?.isPinned ?: false),
-            projectPath = workspacePath.value
+            isPinned = if (isForeground) isConversationPinned.value else (existingSummary?.isPinned ?: false),
+            projectPath = resolvedProjectPath
         )
         conversationManagerDelegate.updateConversationHistoryDirect { list ->
             listOf(currentSummary) + list.filter { it.id != convId }

@@ -308,13 +308,17 @@ class ConversationManagerDelegate {
         if (currentMessages.isNotEmpty()) {
             val title = mutableConversationTitle.value
             val convId = currentId ?: UUID.randomUUID().toString()
+            val existingProjectPath = mutableConversationHistory.value
+                .firstOrNull { it.id == convId }
+                ?.projectPath
+                ?.takeIf { it.isNotBlank() }
             val summary = ConversationSummary(
                 id = convId,
                 title = title,
                 timestamp = System.currentTimeMillis(),
                 messageCount = currentMessages.size,
                 isPinned = mutableIsConversationPinned.value,
-                projectPath = currentWorkspacePath
+                projectPath = existingProjectPath ?: currentWorkspacePath
             )
             mutableConversationHistory.update { list ->
                 listOf(summary) + list.filter { it.id != convId }
