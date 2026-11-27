@@ -60,14 +60,23 @@ object CloudflareApiClient {
 
     fun fetchPagesProjects(token: String, accountId: String): Result<List<CloudflarePagesProjectItem>> {
         return try {
-            val res = CloudHttpHelper.get(
-                "$BASE_URL/accounts/${enc(accountId)}/pages/projects?per_page=50",
-                token
-            )
-            if (res.statusCode !in 200..299) {
-                return Result.failure(Exception(CloudHttpHelper.extractErrorMessage(res.body, res.statusCode)))
+            val allProjects = mutableListOf<CloudflarePagesProjectItem>()
+            var page = 1
+            val maxPages = 20
+            while (page <= maxPages) {
+                val res = CloudHttpHelper.get(
+                    "$BASE_URL/accounts/${enc(accountId)}/pages/projects?per_page=10&page=$page",
+                    token
+                )
+                if (res.statusCode !in 200..299) {
+                    return Result.failure(Exception(CloudHttpHelper.extractErrorMessage(res.body, res.statusCode)))
+                }
+                allProjects.addAll(parsePagesProjectsJson(res.body, accountId))
+                val totalPages = JSONObject(res.body).optJSONObject("result_info")?.optInt("total_pages", 1) ?: 1
+                if (page >= totalPages) break
+                page++
             }
-            Result.success(parsePagesProjectsJson(res.body, accountId))
+            Result.success(allProjects)
         } catch (e: Exception) {
             Result.failure(e)
         }
