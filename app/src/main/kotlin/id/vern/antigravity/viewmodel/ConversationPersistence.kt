@@ -9,6 +9,7 @@ import id.vern.antigravity.data.AttachedFile
 import id.vern.antigravity.data.ChatMessage
 import id.vern.antigravity.data.MessageRole
 import id.vern.antigravity.data.MessageStatus
+import id.vern.antigravity.data.ProjectSortOrder
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -270,6 +271,11 @@ object ConversationPersistence {
             )
         }
         File(targetDir, "history.json").writeText(jsonArray.toString())
+        val projectPathsArray = JSONArray()
+        ProjectPersistence.loadProjects(context, ProjectSortOrder.NAME_ASC).forEach { dir ->
+            projectPathsArray.put(dir.absolutePath)
+        }
+        File(targetDir, "projects.json").writeText(projectPathsArray.toString())
         return maxOf(history.size, copied)
     }
 
@@ -339,6 +345,25 @@ object ConversationPersistence {
         }
         val mergedList = mergedById.values.sortedByDescending { it.timestamp }
         saveConversationHistory(context, mergedList)
-        return if (restoredCount > 0) restoredCount else importedIds.size
+
+        val projectPaths = LinkedHashSet<String>()
+        val projectsFile = File(sourceDir, "projects.json")
+        if (projectsFile.isFile) {
+            runCatching {
+                val arr = JSONArray(projectsFile.readText())
+                for (i in 0 until arr.length()) {
+                    val path = arr.optString(i).trim()
+                    if (path.isNotEmpty()) projectPaths.add(path)
+                }
+            }
+        }
+        mergedList.mapNotNullTo(projectPaths) { it.projectPath?.trim()?.takeIf(String::isNotEmpty) }
+        val restoredProjects = ProjectPersistence.mergeProjectPaths(context, projectPaths)
+
+        return when {
+            restoredCount > 0 -> restoredCount
+            importedIds.isNotEmpty() -> importedIds.size
+            else -> restoredProjects
+        }
     }
 }

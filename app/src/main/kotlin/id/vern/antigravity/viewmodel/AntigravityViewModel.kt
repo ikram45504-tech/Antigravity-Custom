@@ -1203,6 +1203,7 @@ class AntigravityViewModel : ViewModel() {
         ConversationPersistence.exportChatsToDirectory(context)
     fun restoreChatsBackup(context: Context): Int {
         val count = ConversationPersistence.importChatsFromDirectory(context)
+        loadProjects(context)
         if (count > 0) {
             loadConversationHistory(context)
         }

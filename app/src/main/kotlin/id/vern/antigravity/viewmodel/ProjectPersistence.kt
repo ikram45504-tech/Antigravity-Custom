@@ -45,6 +45,26 @@ object ProjectPersistence {
         prefs.edit().putStringSet(KEY_USER_PROJECTS, paths).apply()
     }
 
+    fun mergeProjectPaths(context: Context, paths: Collection<String>): Int {
+        if (paths.isEmpty()) return 0
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val existing = prefs.getStringSet(KEY_USER_PROJECTS, emptySet())?.toMutableSet() ?: mutableSetOf()
+        val defaultDocsPath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS).absolutePath
+        var added = 0
+        for (rawPath in paths) {
+            val path = rawPath.trim()
+            if (path.isEmpty() || path == defaultDocsPath) continue
+            val f = File(path)
+            if (f.exists() && f.isDirectory && existing.add(f.absolutePath)) {
+                added++
+            }
+        }
+        if (added > 0) {
+            prefs.edit().putStringSet(KEY_USER_PROJECTS, existing).apply()
+        }
+        return added
+    }
+
     fun saveProjectSortOrder(context: Context, order: ProjectSortOrder) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putString(KEY_PROJECT_SORT, order.name).apply()
