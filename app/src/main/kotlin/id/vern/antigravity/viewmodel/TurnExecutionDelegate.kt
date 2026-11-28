@@ -680,8 +680,6 @@ class TurnExecutionDelegate {
 
             streamFlushJob?.cancel()
             streamFlushJob = null
-            acpFlushJob?.cancel()
-            acpFlushJob = null
             if (outputSb.isNotEmpty()) {
                 val finalCurrentOutput = outputSb.toString()
                 effectiveCallbacks.updateMessages(convId) { list ->
