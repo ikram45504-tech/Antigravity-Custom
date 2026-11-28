@@ -2638,8 +2638,17 @@ class AntigravityViewModel : ViewModel() {
         if (activeId != null && isConversationExecuting(activeId)) {
             stopAiExecution(activeId)
         }
-        val promptText = userMessage.content
-        mutablePendingInputText.value = promptText
+        val attachmentPlaceholder = context.getString(R.string.chat_attached_files_prompt)
+        mutablePendingInputText.value = resolveRestoredPromptText(
+            promptText = userMessage.content,
+            attachmentOnlyPlaceholder = attachmentPlaceholder,
+            hasAttachments = userMessage.attachments.isNotEmpty()
+        )
+        if (userMessage.attachments.isNotEmpty()) {
+            mutableAttachedFiles.update { existing ->
+                mergeRestoredAttachments(userMessage.attachments, existing)
+            }
+        }
 
         val current = mutableChatMessages.value.toMutableList()
         val userIdx = current.indexOfFirst { it.id == userMessage.id }
@@ -2889,3 +2898,15 @@ class AntigravityViewModel : ViewModel() {
     fun extractAssistantResponseFromCliTranscript(context: Context, cliConvId: String?): String? =
         TranscriptTurnParser.parseTranscriptTurn(context, cliConvId).assistantResponse
 }
+
+internal fun mergeRestoredAttachments(
+    undoneAttachments: List<AttachedFile>,
+    existingAttachments: List<AttachedFile>,
+    maxAttachments: Int = 5
+): List<AttachedFile> = (undoneAttachments + existingAttachments).distinctBy { it.id }.take(maxAttachments)
+
+internal fun resolveRestoredPromptText(
+    promptText: String,
+    attachmentOnlyPlaceholder: String,
+    hasAttachments: Boolean
+): String = if (hasAttachments && promptText == attachmentOnlyPlaceholder) "" else promptText
