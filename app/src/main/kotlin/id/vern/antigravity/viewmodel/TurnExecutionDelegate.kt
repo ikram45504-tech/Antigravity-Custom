@@ -451,6 +451,15 @@ class TurnExecutionDelegate {
             currentTurn++
             outputSb.clear()
 
+            val priorHistory = if (currentTurn == 1 && (activeCliConvId ?: priorCliSession).isNullOrBlank() && !ephemeralVoiceOnly) {
+                effectiveCallbacks.getMessages(convId)
+                    .filter { (it.role == MessageRole.USER || it.role == MessageRole.ASSISTANT) && it.content.isNotBlank() && it.status != MessageStatus.SENDING }
+                    .dropLast(1)
+                    .takeLast(6)
+            } else {
+                emptyList()
+            }
+
             val args = buildCliArgs(
                 context = context,
                 cliId = cliId,
@@ -463,7 +472,8 @@ class TurnExecutionDelegate {
                 currentTurn = currentTurn,
                 prompt = prompt,
                 stagedAttachments = stagedAttachments,
-                voiceInstruction = voiceInstruction
+                voiceInstruction = voiceInstruction,
+                priorMessages = priorHistory
             )
 
             if (currentTurn > 1) {
@@ -891,7 +901,8 @@ class TurnExecutionDelegate {
         currentTurn: Int,
         prompt: String,
         stagedAttachments: List<Triple<String, String, String>>,
-        voiceInstruction: String? = null
+        voiceInstruction: String? = null,
+        priorMessages: List<ChatMessage> = emptyList()
     ): List<String> {
         val args = mutableListOf<String>()
         val currentSec = securityPreset.lowercase()
@@ -936,7 +947,20 @@ class TurnExecutionDelegate {
         } else {
             ""
         }
-        val basePrompt = if (currentTurn == 1) expandMentionsContext(context, prompt, validWsDir) else prompt
+        val expandedPrompt = if (currentTurn == 1) expandMentionsContext(context, prompt, validWsDir) else prompt
+        val basePrompt = if (currentTurn == 1 && priorMessages.isNotEmpty() && !expandedPrompt.trimStart().startsWith("/")) {
+            buildString {
+                append("[Previous conversation context]\n")
+                priorMessages.forEach { msg ->
+                    val speaker = if (msg.role == MessageRole.USER) "User" else "Assistant"
+                    append("$speaker: ${msg.content.trim().take(600)}\n")
+                }
+                append("\n[Current request]\n")
+                append(expandedPrompt)
+            }
+        } else {
+            expandedPrompt
+        }
         val currentPrompt = if (currentTurn == 1 && stagedAttachments.isNotEmpty()) {
             buildString {
                 if (basePrompt.trimStart().startsWith("/")) {

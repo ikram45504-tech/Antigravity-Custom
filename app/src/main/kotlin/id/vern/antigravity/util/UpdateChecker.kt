@@ -196,23 +196,101 @@ class UpdateChecker(private val context: Context) {
         }
     }
 
-    fun startDownload(info: UpdateInfo): Long {
-        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        val effectiveUrl = info.downloadUrl
+    fun resolveTargetFileName(info: UpdateInfo): String {
         val rawFileName = if (info.fileName.isNotBlank()) {
             info.fileName
         } else {
-            effectiveUrl.substringAfterLast("/").substringBefore("?").ifBlank { "antigravity-update-${info.version}.apk" }
+            info.downloadUrl.substringAfterLast("/").substringBefore("?").ifBlank { "antigravity-update-${info.version}.apk" }
         }
-        val targetFileName = if (rawFileName.endsWith(".apk", ignoreCase = true)) rawFileName else "$rawFileName.apk"
+        return if (rawFileName.endsWith(".apk", ignoreCase = true)) rawFileName else "$rawFileName.apk"
+    }
+
+    /**
+     * Checks DownloadManager and local app downloads directory to see if [info]
+     * is already downloading or has already been downloaded.
+     */
+    fun getExistingUpdateState(info: UpdateInfo): AppUpdateState? {
+        val targetFileName = resolveTargetFileName(info)
+        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+
+        try {
+            val query = DownloadManager.Query().setFilterByStatus(
+                DownloadManager.STATUS_PENDING or
+                    DownloadManager.STATUS_RUNNING or
+                    DownloadManager.STATUS_PAUSED or
+                    DownloadManager.STATUS_SUCCESSFUL
+            )
+            dm.query(query)?.use { cursor ->
+                val idIdx = cursor.getColumnIndex(DownloadManager.COLUMN_ID)
+                val uriIdx = cursor.getColumnIndex(DownloadManager.COLUMN_URI)
+                val statusIdx = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+                val localUriIdx = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
+                val downloadedIdx = cursor.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+                val totalIdx = cursor.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+
+                while (cursor.moveToNext()) {
+                    val rowUri = if (uriIdx >= 0) cursor.getString(uriIdx) else null
+                    val rowLocalUri = if (localUriIdx >= 0) cursor.getString(localUriIdx) else null
+                    val matchesUrl = !rowUri.isNullOrBlank() && rowUri == info.downloadUrl
+                    val matchesName = !rowLocalUri.isNullOrBlank() && rowLocalUri.endsWith("/$targetFileName")
+                    if (!matchesUrl && !matchesName) continue
+
+                    val downloadId = if (idIdx >= 0) cursor.getLong(idIdx) else -1L
+                    val status = if (statusIdx >= 0) cursor.getInt(statusIdx) else -1
+                    when (status) {
+                        DownloadManager.STATUS_SUCCESSFUL -> {
+                            val file = localUriToFile(rowLocalUri)
+                            if (file != null && file.exists() && file.length() > 0) {
+                                return AppUpdateState.ReadyToInstall(downloadId = downloadId, filePath = file.absolutePath)
+                            }
+                        }
+                        DownloadManager.STATUS_PENDING,
+                        DownloadManager.STATUS_RUNNING,
+                        DownloadManager.STATUS_PAUSED -> {
+                            val downloaded = if (downloadedIdx >= 0) cursor.getLong(downloadedIdx) else 0L
+                            val total = if (totalIdx >= 0) cursor.getLong(totalIdx) else 0L
+                            val progress = if (total > 0) ((downloaded * 100L) / total).toInt() else 0
+                            return AppUpdateState.Downloading(progress = progress, downloadId = downloadId)
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed querying DownloadManager for existing update: ${e.message}")
+        }
 
         val downloadDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
         if (downloadDir != null) {
             val existingFile = File(downloadDir, targetFileName)
-            if (existingFile.exists()) {
-                try { existingFile.delete() } catch (e: Exception) {}
+            if (existingFile.exists() && existingFile.isFile && existingFile.length() > 0) {
+                return AppUpdateState.ReadyToInstall(downloadId = -1L, filePath = existingFile.absolutePath)
             }
         }
+        return null
+    }
+
+    private fun localUriToFile(localUriString: String?): File? {
+        if (localUriString.isNullOrBlank()) return null
+        return if (localUriString.startsWith("file://")) {
+            val path = Uri.parse(localUriString).path
+            if (path.isNullOrBlank()) null else File(path)
+        } else {
+            File(localUriString)
+        }
+    }
+
+    fun startDownload(info: UpdateInfo): Long {
+        val existing = getExistingUpdateState(info)
+        if (existing is AppUpdateState.Downloading && existing.downloadId > 0L) {
+            return existing.downloadId
+        }
+        if (existing is AppUpdateState.ReadyToInstall && existing.downloadId > 0L) {
+            return existing.downloadId
+        }
+
+        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        val effectiveUrl = info.downloadUrl
+        val targetFileName = resolveTargetFileName(info)
 
         val request = DownloadManager.Request(Uri.parse(effectiveUrl)).apply {
             setTitle(context.getString(R.string.ota_download_title, targetFileName))
@@ -223,7 +301,7 @@ class UpdateChecker(private val context: Context) {
         return dm.enqueue(request)
     }
 
-    fun installApk(downloadId: Long) {
+    fun installApk(downloadId: Long, filePath: String? = null) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 if (!context.packageManager.canRequestPackageInstalls()) {
@@ -239,37 +317,44 @@ class UpdateChecker(private val context: Context) {
             val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             var contentUri: Uri? = null
 
-            try {
-                val query = DownloadManager.Query().setFilterById(downloadId)
-                var localUriString: String? = null
-                dm.query(query)?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        val localUriIdx = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
-                        if (localUriIdx >= 0) {
-                            localUriString = cursor.getString(localUriIdx)
+            if (!filePath.isNullOrBlank()) {
+                val directFile = File(filePath)
+                if (directFile.exists() && directFile.length() > 0) {
+                    contentUri = FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        directFile
+                    )
+                }
+            }
+
+            if (contentUri == null && downloadId > 0L) {
+                try {
+                    val query = DownloadManager.Query().setFilterById(downloadId)
+                    var localUriString: String? = null
+                    dm.query(query)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val localUriIdx = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
+                            if (localUriIdx >= 0) {
+                                localUriString = cursor.getString(localUriIdx)
+                            }
                         }
                     }
-                }
 
-                if (!localUriString.isNullOrBlank()) {
-                    val file = if (localUriString.startsWith("file://")) {
-                        File(Uri.parse(localUriString).path ?: "")
-                    } else {
-                        File(localUriString)
-                    }
-                    if (file.exists() && file.length() > 0) {
+                    val file = localUriToFile(localUriString)
+                    if (file != null && file.exists() && file.length() > 0) {
                         contentUri = FileProvider.getUriForFile(
                             context,
                             "${context.packageName}.fileprovider",
                             file
                         )
                     }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed resolving FileProvider URI: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed resolving FileProvider URI: ${e.message}")
             }
 
-            if (contentUri == null) {
+            if (contentUri == null && downloadId > 0L) {
                 contentUri = dm.getUriForDownloadedFile(downloadId)
             }
 
@@ -324,7 +409,9 @@ class UpdateChecker(private val context: Context) {
                     val status = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
                     when (status) {
                         DownloadManager.STATUS_SUCCESSFUL -> {
-                            onState(AppUpdateState.ReadyToInstall(downloadId))
+                            val localUriIdx = c.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
+                            val localFile = if (localUriIdx >= 0) localUriToFile(c.getString(localUriIdx)) else null
+                            onState(AppUpdateState.ReadyToInstall(downloadId, localFile?.absolutePath))
                             downloading = false
                         }
                         DownloadManager.STATUS_FAILED -> {
@@ -336,7 +423,7 @@ class UpdateChecker(private val context: Context) {
                             val total = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
                             if (total > 0) {
                                 val progress = ((downloaded * 100L) / total).toInt()
-                                onState(AppUpdateState.Downloading(progress))
+                                onState(AppUpdateState.Downloading(progress, downloadId))
                             }
                         }
                     }
@@ -357,8 +444,8 @@ class UpdateChecker(private val context: Context) {
 sealed class AppUpdateState {
     object Idle : AppUpdateState()
     data class Available(val info: UpdateChecker.UpdateInfo) : AppUpdateState()
-    data class Downloading(val progress: Int) : AppUpdateState()
-    data class ReadyToInstall(val downloadId: Long) : AppUpdateState()
+    data class Downloading(val progress: Int, val downloadId: Long = -1L) : AppUpdateState()
+    data class ReadyToInstall(val downloadId: Long, val filePath: String? = null) : AppUpdateState()
 }
 
 typealias OtaState = AppUpdateState

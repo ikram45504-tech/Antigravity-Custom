@@ -27,6 +27,8 @@ class CoreServerService : Service() {
         const val ACTION_START = "id.ikram.antigravity.action.START"
         const val ACTION_STOP = "id.ikram.antigravity.action.STOP"
         const val ACTION_RESTART = "id.ikram.antigravity.action.RESTART"
+        const val ACTION_VOICE_ACTIVE = "id.ikram.antigravity.action.VOICE_ACTIVE"
+        const val ACTION_VOICE_INACTIVE = "id.ikram.antigravity.action.VOICE_INACTIVE"
 
         fun startService(context: Context) {
             val intent = Intent(context, CoreServerService::class.java).apply {
@@ -36,6 +38,19 @@ class CoreServerService : Service() {
                 context.startForegroundService(intent)
             } else {
                 context.startService(intent)
+            }
+        }
+
+        fun setVoiceSessionActive(context: Context, active: Boolean) {
+            runCatching {
+                val intent = Intent(context, CoreServerService::class.java).apply {
+                    action = if (active) ACTION_VOICE_ACTIVE else ACTION_VOICE_INACTIVE
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
             }
         }
 
@@ -84,6 +99,28 @@ class CoreServerService : Service() {
                     startBackgroundDaemonInternal()
                 }
                 ForegroundNotification.update(this, getString(R.string.notification_engine_running))
+            }
+            ACTION_VOICE_ACTIVE -> {
+                val hasMic = androidx.core.content.ContextCompat.checkSelfPermission(
+                    this,
+                    android.Manifest.permission.RECORD_AUDIO
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                runCatching {
+                    ForegroundNotification.start(
+                        this,
+                        "Gemini Live Voice active",
+                        includeMicrophone = hasMic
+                    )
+                }
+            }
+            ACTION_VOICE_INACTIVE -> {
+                runCatching {
+                    ForegroundNotification.start(
+                        this,
+                        getString(R.string.notification_engine_running),
+                        includeMicrophone = false
+                    )
+                }
             }
             else -> {
                 ForegroundNotification.update(this, getString(R.string.notification_engine_running))

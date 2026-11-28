@@ -18,7 +18,7 @@ object ForegroundNotification {
     const val NOTIFICATION_ID = 1001
     const val CHANNEL_ID = "agy_core_service_channel"
 
-    fun start(service: Service, statusText: String? = null) {
+    fun start(service: Service, statusText: String? = null, includeMicrophone: Boolean = false) {
         val manager = service.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && manager != null) {
             val channel = NotificationChannel(
@@ -34,7 +34,14 @@ object ForegroundNotification {
 
         val text = statusText ?: service.getString(R.string.notification_engine_active)
         val notification = buildNotification(service, text)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val fgsType = if (includeMicrophone) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            } else {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            }
+            service.startForeground(NOTIFICATION_ID, notification, fgsType)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             service.startForeground(
                 NOTIFICATION_ID,
                 notification,

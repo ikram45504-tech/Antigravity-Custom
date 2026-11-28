@@ -19,6 +19,89 @@ object ConversationPersistence {
     private const val PREFS_NAME = "antigravity_prefs"
     private const val KEY_CONVERSATION_HISTORY = "ag_conversation_history"
     private const val KEY_LAST_ACTIVE_CONV_ID = "ag_last_active_conv_id"
+    private const val KEY_CLI_SESSION_MAP = "ag_cli_session_map"
+
+    fun saveCliSessionId(context: Context, conversationId: String, cliSessionId: String) {
+        if (conversationId.isBlank() || cliSessionId.isBlank()) return
+        try {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val existing = prefs.getString(KEY_CLI_SESSION_MAP, null)
+            val json = if (!existing.isNullOrBlank()) {
+                runCatching { JSONObject(existing) }.getOrElse { JSONObject() }
+            } else {
+                JSONObject()
+            }
+            json.put(conversationId, cliSessionId)
+            prefs.edit().putString(KEY_CLI_SESSION_MAP, json.toString()).apply()
+        } catch (e: Exception) {
+            Log.w("ConversationPersistence", "Failed saving CLI session id: ${e.message}")
+        }
+    }
+
+    fun getCliSessionId(context: Context, conversationId: String): String? {
+        if (conversationId.isBlank()) return null
+        return try {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val raw = prefs.getString(KEY_CLI_SESSION_MAP, null) ?: return null
+            JSONObject(raw).optString(conversationId, "").takeIf { it.isNotBlank() }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun saveLiveVoiceTurn(context: Context, conversationKey: String, userText: String, modelText: String) {
+        if (userText.isBlank() && modelText.isBlank()) return
+        try {
+            val safeKey = conversationKey.replace(Regex("[^a-zA-Z0-9_-]"), "_").ifBlank { "default" }
+            val dir = File(context.filesDir, "live_voice_history").apply { mkdirs() }
+            val file = File(dir, "$safeKey.json")
+            val arr = if (file.isFile) {
+                runCatching { JSONArray(file.readText(Charsets.UTF_8)) }.getOrElse { JSONArray() }
+            } else {
+                JSONArray()
+            }
+            if (userText.isNotBlank()) {
+                arr.put(JSONObject().put("role", "user").put("text", userText.trim()))
+            }
+            if (modelText.isNotBlank()) {
+                arr.put(JSONObject().put("role", "model").put("text", modelText.trim()))
+            }
+            val maxEntries = 32
+            val trimmed = if (arr.length() > maxEntries) {
+                JSONArray().apply {
+                    for (i in (arr.length() - maxEntries) until arr.length()) {
+                        put(arr.getJSONObject(i))
+                    }
+                }
+            } else {
+                arr
+            }
+            file.writeText(trimmed.toString(), Charsets.UTF_8)
+        } catch (e: Exception) {
+            Log.w("ConversationPersistence", "Failed saving live voice turn: ${e.message}")
+        }
+    }
+
+    fun loadLiveVoiceTurns(context: Context, conversationKey: String): List<Pair<String, String>> {
+        return try {
+            val safeKey = conversationKey.replace(Regex("[^a-zA-Z0-9_-]"), "_").ifBlank { "default" }
+            val file = File(File(context.filesDir, "live_voice_history"), "$safeKey.json")
+            if (!file.isFile) return emptyList()
+            val arr = JSONArray(file.readText(Charsets.UTF_8))
+            val out = mutableListOf<Pair<String, String>>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                val role = obj.optString("role", "")
+                val text = obj.optString("text", "").trim()
+                if ((role == "user" || role == "model") && text.isNotEmpty()) {
+                    out.add(role to text)
+                }
+            }
+            out
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
 
     fun saveConversationHistory(context: Context, history: List<ConversationSummary>) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

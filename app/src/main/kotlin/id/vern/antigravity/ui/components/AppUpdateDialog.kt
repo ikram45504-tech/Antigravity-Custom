@@ -34,7 +34,7 @@ fun AppUpdateDialog(
     state: AppUpdateState,
     onDismiss: () -> Unit,
     onStartDownload: (UpdateChecker.UpdateInfo) -> Unit,
-    onInstallApk: (Long) -> Unit
+    onInstallApk: (Long, String?) -> Unit
 ) {
     when (state) {
         is AppUpdateState.Available -> {
@@ -135,8 +135,13 @@ fun AppUpdateDialog(
                     Text(stringResource(R.string.update_ready_install_msg))
                 },
                 confirmButton = {
-                    Button(onClick = { onInstallApk(state.downloadId) }) {
+                    Button(onClick = { onInstallApk(state.downloadId, state.filePath) }) {
                         Text(stringResource(R.string.btn_install), fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.later))
                     }
                 }
             )

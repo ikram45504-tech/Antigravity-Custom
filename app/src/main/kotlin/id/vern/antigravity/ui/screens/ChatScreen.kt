@@ -318,7 +318,8 @@ fun ChatScreen(
                 GeminiLiveConfig(
                     apiKey = geminiLiveApiKey,
                     vertexProjectId = geminiLiveVertexProject,
-                    systemInstruction = fullInstr
+                    systemInstruction = fullInstr,
+                    initialHistoryTurns = viewModel.buildLiveHistoryContext(context)
                 )
             )
         }
@@ -331,13 +332,10 @@ fun ChatScreen(
         }
     }
 
-    DisposableEffect(lifecycleOwner, liveVoiceController, geminiLiveClient) {
+    DisposableEffect(lifecycleOwner, liveVoiceController) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) {
                 liveVoiceController.pause()
-                if (geminiLiveState.active) {
-                    geminiLiveClient.stop()
-                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)

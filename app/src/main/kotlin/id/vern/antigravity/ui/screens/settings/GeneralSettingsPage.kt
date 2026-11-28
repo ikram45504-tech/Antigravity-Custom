@@ -1053,11 +1053,22 @@ fun GeneralSettingsPage(
                             }
 
                             Spacer(modifier = Modifier.height(12.dp))
+                            val isVertexExpressKey = geminiLiveApiKey.startsWith("AQ.")
                             OutlinedTextField(
                                 value = geminiLiveApiKey,
                                 onValueChange = { viewModel.setGeminiLiveApiKey(context, it) },
                                 label = { Text("Gemini Live API Key (optional)") },
-                                placeholder = { Text("Leave blank to use Google OAuth") },
+                                placeholder = { Text("Paste AIza... key from aistudio.google.com") },
+                                isError = isVertexExpressKey,
+                                supportingText = {
+                                    Text(
+                                        text = when {
+                                            isVertexExpressKey -> "Vertex Express keys (AQ...) do not support Live WebSocket. Use an AIza... key from aistudio.google.com/apikey."
+                                            geminiLiveApiKey.isNotBlank() -> "Saved automatically"
+                                            else -> "Leave blank to use Google OAuth"
+                                        }
+                                    )
+                                },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -1067,6 +1078,11 @@ fun GeneralSettingsPage(
                                 onValueChange = { viewModel.setGeminiLiveVertexProject(context, it) },
                                 label = { Text("Vertex AI Project ID (optional)") },
                                 placeholder = { Text("Optional GCP project for OAuth Live") },
+                                supportingText = {
+                                    Text(
+                                        text = if (geminiLiveVertexProject.isNotBlank()) "Saved automatically" else "Optional"
+                                    )
+                                },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )

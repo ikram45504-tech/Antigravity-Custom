@@ -27,7 +27,7 @@ object CoreUpdateDelegate {
             val checker = UpdateChecker(context)
             val info = checker.checkForUpdates(currentVersion, isManualCheck = isManualCheck)
             if (info != null) {
-                AppUpdateState.Available(info)
+                checker.getExistingUpdateState(info) ?: AppUpdateState.Available(info)
             } else {
                 if (isManualCheck) {
                     withContext(Dispatchers.Main) {

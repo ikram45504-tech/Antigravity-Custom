@@ -108,9 +108,13 @@ class MainActivity : ComponentActivity() {
                     state = otaState,
                     onDismiss = { viewModel.dismissOtaUpdate() },
                     onStartDownload = { info -> viewModel.startOtaDownload(this@MainActivity, info) },
-                    onInstallApk = { downloadId ->
-                        UpdateChecker(this@MainActivity).installApk(downloadId)
-                        viewModel.dismissOtaUpdate()
+                    onInstallApk = { downloadId, filePath ->
+                        UpdateChecker(this@MainActivity).installApk(downloadId, filePath)
+                        val canInstall = android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O ||
+                            packageManager.canRequestPackageInstalls()
+                        if (canInstall) {
+                            viewModel.dismissOtaUpdate()
+                        }
                     }
                 )
             }

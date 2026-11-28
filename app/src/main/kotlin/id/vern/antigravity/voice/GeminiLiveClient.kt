@@ -3,9 +3,13 @@ package id.vern.antigravity.voice
 import android.content.Context
 import android.util.Base64
 import id.vern.antigravity.oauth.OAuthManager
+import id.vern.antigravity.service.CoreServerService
+import id.vern.antigravity.service.WakeLockHolder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -67,7 +71,8 @@ data class GeminiLiveConfig(
     val systemInstruction: String = "You are Antigravity, a helpful voice coding assistant. " +
         "When the user asks for reviews, ratings, explanations, or suggestions, inspect files read-only without modifying anything. " +
         "Only call write_workspace_file or delegate_to_agy_agent when the user explicitly asks you to implement, edit, or execute changes. " +
-        "Be concise, natural, and conversational."
+        "Be concise, natural, and conversational.",
+    val initialHistoryTurns: List<Pair<String, String>> = emptyList()
 )
 
 /**
@@ -170,28 +175,74 @@ class GeminiLiveClient(
 
     @Volatile
     private var webSocket: WebSocket? = null
+    @Volatile
+    private var activeConfig: GeminiLiveConfig? = null
+    private var connectTimeoutJob: Job? = null
+    private val wakeLockHolder = WakeLockHolder()
     private val userTurnSb = StringBuilder()
     private val modelTurnSb = StringBuilder()
 
     fun start(config: GeminiLiveConfig) {
         stop()
+        activeConfig = config
         userTurnSb.clear()
         modelTurnSb.clear()
+        wakeLockHolder.acquire(context, 30 * 60 * 1000L)
         mutableState.value = GeminiLiveUiState(
             active = true,
             connectionState = GeminiLiveConnectionState.CONNECTING,
             statusMessage = "Connecting to Live..."
         )
 
+        connectTimeoutJob = scope.launch {
+            delay(15_000L)
+            if (mutableState.value.active && mutableState.value.connectionState == GeminiLiveConnectionState.CONNECTING) {
+                runCatching { webSocket?.close(1000, "Connection timeout") }
+                webSocket = null
+                wakeLockHolder.release()
+                CoreServerService.setVoiceSessionActive(context, false)
+                val hint = if (config.apiKey.isBlank() && config.vertexProjectId.isBlank()) {
+                    "Live connection timed out. Set an AIza... Gemini Live API Key or Vertex Project ID in Settings, or enable CLI Voice Fallback."
+                } else {
+                    "Live connection timed out. Check network and credentials."
+                }
+                mutableState.update {
+                    it.copy(
+                        active = false,
+                        connectionState = GeminiLiveConnectionState.ERROR,
+                        statusMessage = hint
+                    )
+                }
+                onAuthFallbackRequired(hint)
+            }
+        }
+
         scope.launch {
             val apiKey = config.apiKey.trim()
             val vertexProj = config.vertexProjectId.trim()
             var bearerToken: String? = null
 
+            if (apiKey.startsWith("AQ.")) {
+                connectTimeoutJob?.cancel()
+                wakeLockHolder.release()
+                val msg = "Vertex Express keys (AQ...) do not support Live WebSocket. Use an AIza... key from aistudio.google.com/apikey."
+                mutableState.update {
+                    it.copy(
+                        active = false,
+                        connectionState = GeminiLiveConnectionState.ERROR,
+                        statusMessage = msg
+                    )
+                }
+                onAuthFallbackRequired(msg)
+                return@launch
+            }
+
             if (apiKey.isEmpty()) {
                 OAuthManager.refreshTokenIfNeeded(context)
                 bearerToken = OAuthManager.getAccessToken(context)
                 if (bearerToken.isNullOrBlank()) {
+                    connectTimeoutJob?.cancel()
+                    wakeLockHolder.release()
                     mutableState.update {
                         it.copy(
                             active = false,
@@ -238,6 +289,9 @@ class GeminiLiveClient(
                 }
 
                 override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
+                    connectTimeoutJob?.cancel()
+                    wakeLockHolder.release()
+                    CoreServerService.setVoiceSessionActive(context, false)
                     val code = response?.code ?: -1
                     val msg = t.message ?: "Connection failed ($code)"
                     audioEngine.stop()
@@ -260,14 +314,45 @@ class GeminiLiveClient(
                     }
                 }
 
-                override fun onClosed(ws: WebSocket, code: Int, reason: String) {
+                override fun onClosing(ws: WebSocket, code: Int, reason: String) {
+                    connectTimeoutJob?.cancel()
+                    wakeLockHolder.release()
+                    CoreServerService.setVoiceSessionActive(context, false)
+                    ws.close(code, null)
                     audioEngine.stop()
-                    mutableState.update {
-                        it.copy(
-                            active = false,
-                            connectionState = GeminiLiveConnectionState.IDLE,
-                            statusMessage = ""
-                        )
+                    val detail = reason.ifBlank { "WebSocket closed ($code)" }
+                    if (code == 1008 || code == 1007 || code == 401 || code == 403) {
+                        mutableState.update {
+                            it.copy(
+                                active = false,
+                                connectionState = GeminiLiveConnectionState.ERROR,
+                                statusMessage = detail
+                            )
+                        }
+                        onAuthFallbackRequired(detail)
+                    } else if (code != 1000) {
+                        mutableState.update {
+                            it.copy(
+                                connectionState = GeminiLiveConnectionState.ERROR,
+                                statusMessage = detail
+                            )
+                        }
+                    }
+                }
+
+                override fun onClosed(ws: WebSocket, code: Int, reason: String) {
+                    connectTimeoutJob?.cancel()
+                    wakeLockHolder.release()
+                    CoreServerService.setVoiceSessionActive(context, false)
+                    audioEngine.stop()
+                    if (mutableState.value.connectionState != GeminiLiveConnectionState.ERROR) {
+                        mutableState.update {
+                            it.copy(
+                                active = false,
+                                connectionState = GeminiLiveConnectionState.IDLE,
+                                statusMessage = ""
+                            )
+                        }
                     }
                 }
             })
@@ -282,20 +367,61 @@ class GeminiLiveClient(
     }
 
     fun stop() {
+        connectTimeoutJob?.cancel()
+        connectTimeoutJob = null
+        val pendingUser = userTurnSb.toString().trim()
+        val pendingModel = modelTurnSb.toString().trim()
+        userTurnSb.clear()
+        modelTurnSb.clear()
+        if (pendingUser.isNotEmpty() || pendingModel.isNotEmpty()) {
+            runCatching { onTurnFinished(pendingUser, pendingModel) }
+        }
+        activeConfig = null
         runCatching { webSocket?.close(1000, "User ended session") }
         webSocket = null
         audioEngine.stop()
+        wakeLockHolder.release()
+        CoreServerService.setVoiceSessionActive(context, false)
         mutableState.value = GeminiLiveUiState(
             active = false,
             connectionState = GeminiLiveConnectionState.IDLE
         )
     }
 
+    private fun sendInitialHistory(turns: List<Pair<String, String>>) {
+        if (turns.isEmpty()) return
+        val ws = webSocket ?: return
+        val turnsJson = JSONArray()
+        for ((role, text) in turns) {
+            if (text.isBlank()) continue
+            val normalizedRole = if (role == "model") "model" else "user"
+            turnsJson.put(
+                JSONObject().apply {
+                    put("role", normalizedRole)
+                    put("parts", JSONArray().put(JSONObject().put("text", text)))
+                }
+            )
+        }
+        if (turnsJson.length() == 0) return
+        val frame = JSONObject().apply {
+            put("clientContent", JSONObject().apply {
+                put("turns", turnsJson)
+                put("turnComplete", false)
+            })
+        }
+        ws.send(frame.toString())
+    }
+
     private fun handleServerPayload(jsonText: String) {
         for (event in parseServerMessage(jsonText)) {
             when (event) {
                 is GeminiLiveEvent.SetupComplete -> {
+                    connectTimeoutJob?.cancel()
+                    CoreServerService.setVoiceSessionActive(context, true)
                     runCatching {
+                        activeConfig?.initialHistoryTurns?.let { history ->
+                            sendInitialHistory(history)
+                        }
                         audioEngine.startPlayback()
                         audioEngine.startCapture { pcmChunk ->
                             sendAudioChunk(pcmChunk)

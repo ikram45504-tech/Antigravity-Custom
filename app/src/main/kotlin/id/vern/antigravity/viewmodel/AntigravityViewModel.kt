@@ -953,8 +953,10 @@ class AntigravityViewModel : ViewModel() {
         }
 
     fun appendLiveVoiceTurnToChat(context: Context, userText: String, modelText: String) {
-        if (voiceOnlyMode.value) return
-        val convId = activeConversationId.value ?: return
+        val convId = activeConversationId.value
+        val historyKey = convId ?: "default"
+        ConversationPersistence.saveLiveVoiceTurn(context, historyKey, userText, modelText)
+        if (voiceOnlyMode.value || convId == null) return
         val additions = mutableListOf<ChatMessage>()
         if (userText.isNotBlank()) {
             additions.add(
@@ -980,6 +982,40 @@ class AntigravityViewModel : ViewModel() {
             updateMessagesForConv(convId) { it + additions }
             ConversationPersistence.saveMessagesForConversation(context, convId, getMessagesForConversation(convId))
         }
+    }
+
+    /**
+     * Builds recent (role, text) turns from both the active conversation and persisted Live Voice
+     * history so reopening Gemini Live preserves prior context.
+     */
+    fun buildLiveHistoryContext(context: Context): List<Pair<String, String>> {
+        val convId = activeConversationId.value
+        val chatTurns = if (convId != null) {
+            getMessagesForConversation(convId)
+                .filter { (it.role == MessageRole.USER || it.role == MessageRole.ASSISTANT) && it.content.isNotBlank() }
+                .takeLast(12)
+                .map { msg ->
+                    val role = if (msg.role == MessageRole.USER) "user" else "model"
+                    role to msg.content.trim().take(1500)
+                }
+        } else {
+            emptyList()
+        }
+        val liveTurns = ConversationPersistence.loadLiveVoiceTurns(context, convId ?: "default")
+            .takeLast(16)
+            .map { (role, text) -> role to text.take(1500) }
+
+        if (chatTurns.isEmpty()) return liveTurns
+        if (liveTurns.isEmpty()) return chatTurns
+
+        val merged = chatTurns.toMutableList()
+        val seen = chatTurns.toSet()
+        for (turn in liveTurns) {
+            if (turn !in seen) {
+                merged.add(turn)
+            }
+        }
+        return merged.takeLast(16)
     }
 
     fun testPromptCompletionAlert(context: Context) {
@@ -1592,16 +1628,33 @@ class AntigravityViewModel : ViewModel() {
     val otaState = MutableStateFlow<AppUpdateState>(AppUpdateState.Idle)
 
     fun checkForOtaUpdates(context: Context, isManualCheck: Boolean = false) {
+        val current = otaState.value
+        if (current is AppUpdateState.Downloading || current is AppUpdateState.ReadyToInstall) {
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
-            val newState = CoreUpdateDelegate.checkForOtaUpdates(context, isManualCheck)
-            if (newState != null) {
-                otaState.value = newState
+            val newState = CoreUpdateDelegate.checkForOtaUpdates(context, isManualCheck) ?: return@launch
+            val latestCurrent = otaState.value
+            if (latestCurrent is AppUpdateState.Downloading || latestCurrent is AppUpdateState.ReadyToInstall) {
+                return@launch
+            }
+            otaState.value = newState
+            if (newState is AppUpdateState.Downloading && newState.downloadId > 0L) {
+                UpdateChecker(context).trackDownloadProgress(newState.downloadId) { state ->
+                    otaState.value = state
+                }
             }
         }
     }
 
     fun startOtaDownload(context: Context, info: UpdateChecker.UpdateInfo) {
-        otaState.value = AppUpdateState.Downloading(0)
+        if (otaState.value is AppUpdateState.Downloading) return
+        val existing = UpdateChecker(context).getExistingUpdateState(info)
+        if (existing is AppUpdateState.ReadyToInstall) {
+            otaState.value = existing
+            return
+        }
+        otaState.value = if (existing is AppUpdateState.Downloading) existing else AppUpdateState.Downloading(0)
         viewModelScope.launch(Dispatchers.IO) {
             CoreUpdateDelegate.startOtaDownload(context, info) { state ->
                 otaState.value = state
@@ -2541,9 +2594,15 @@ class AntigravityViewModel : ViewModel() {
                 override fun thinkingBudget(): String = thinkingBudget.value
                 override fun skipPermissions(): Boolean = skipPermissions.value
                 override fun enableTerminalSandbox(): Boolean = permissionState.value.enableTerminalSandbox
-                override fun getCliSessionId(convId: String): String? = convIdToCliSessionId[convId]
+                override fun getCliSessionId(convId: String): String? {
+                    return convIdToCliSessionId[convId]
+                        ?: ConversationPersistence.getCliSessionId(context, convId)?.also {
+                            convIdToCliSessionId[convId] = it
+                        }
+                }
                 override fun setCliSessionId(convId: String, cliSessionId: String) {
                     convIdToCliSessionId[convId] = cliSessionId
+                    ConversationPersistence.saveCliSessionId(context, convId, cliSessionId)
                 }
                 override fun getMessages(convId: String): List<ChatMessage> = messagesByConv[convId].orEmpty()
                 override fun updateMessages(convId: String, transform: (List<ChatMessage>) -> List<ChatMessage>): List<ChatMessage> =
