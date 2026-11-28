@@ -2899,11 +2899,18 @@ class AntigravityViewModel : ViewModel() {
         TranscriptTurnParser.parseTranscriptTurn(context, cliConvId).assistantResponse
 }
 
+internal fun <T> mergeByUniqueKey(
+    undone: List<T>,
+    existing: List<T>,
+    maxItems: Int = 5,
+    keySelector: (T) -> String
+): List<T> = (undone + existing).distinctBy(keySelector).take(maxItems)
+
 internal fun mergeRestoredAttachments(
     undoneAttachments: List<AttachedFile>,
     existingAttachments: List<AttachedFile>,
     maxAttachments: Int = 5
-): List<AttachedFile> = (undoneAttachments + existingAttachments).distinctBy { it.id }.take(maxAttachments)
+): List<AttachedFile> = mergeByUniqueKey(undoneAttachments, existingAttachments, maxAttachments) { it.id }
 
 internal fun resolveRestoredPromptText(
     promptText: String,

@@ -1,25 +1,19 @@
 package id.vern.antigravity.viewmodel
 
-import id.vern.antigravity.data.AttachedFile
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class UndoPromptRestoreTest {
 
     @Test
-    fun `mergeRestoredAttachments restores undone files without duplicates and caps at 5`() {
-        val a1 = AttachedFile(id = "1", name = "a.png", uri = "file:///a.png", mimeType = "image/png", sizeBytes = 10L)
-        val a2 = AttachedFile(id = "2", name = "b.txt", uri = "file:///b.txt", mimeType = "text/plain", sizeBytes = 20L)
-        val a3 = AttachedFile(id = "3", name = "c.kt", uri = "file:///c.kt", mimeType = "text/plain", sizeBytes = 30L)
-        val a4 = AttachedFile(id = "4", name = "d.kt", uri = "file:///d.kt", mimeType = "text/plain", sizeBytes = 40L)
-        val a5 = AttachedFile(id = "5", name = "e.kt", uri = "file:///e.kt", mimeType = "text/plain", sizeBytes = 50L)
-        val a6 = AttachedFile(id = "6", name = "f.kt", uri = "file:///f.kt", mimeType = "text/plain", sizeBytes = 60L)
+    fun `mergeByUniqueKey restores undone items without duplicates and caps at 5`() {
+        val merged = mergeByUniqueKey(
+            undone = listOf("1:a.png", "2:b.txt", "3:c.kt"),
+            existing = listOf("2:b.txt", "4:d.kt", "5:e.kt", "6:f.kt"),
+            maxItems = 5
+        ) { it.substringBefore(':') }
 
-        val merged = mergeRestoredAttachments(
-            undoneAttachments = listOf(a1, a2, a3),
-            existingAttachments = listOf(a2, a4, a5, a6)
-        )
-        assertEquals(listOf(a1, a2, a3, a4, a5), merged)
+        assertEquals(listOf("1:a.png", "2:b.txt", "3:c.kt", "4:d.kt", "5:e.kt"), merged)
     }
 
     @Test
