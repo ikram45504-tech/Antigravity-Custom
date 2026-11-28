@@ -32,6 +32,21 @@ class UpdateChecker(private val context: Context) {
         const val OTA_NOTIFICATION_ID = 1009
         const val GITHUB_OWNER = "ikram45504-tech"
         const val GITHUB_REPO = "Antigravity-Custom"
+
+        fun resolveTargetFileName(info: UpdateInfo): String {
+            val safeVersion = info.version.trim().replace(Regex("[^a-zA-Z0-9._-]"), "_")
+            val rawFileName = if (info.fileName.isNotBlank()) {
+                info.fileName
+            } else {
+                info.downloadUrl.substringAfterLast("/").substringBefore("?").ifBlank { "antigravity-update.apk" }
+            }
+            val base = rawFileName.removeSuffix(".apk").removeSuffix(".APK")
+            return if (safeVersion.isNotBlank() && !base.contains(safeVersion, ignoreCase = true)) {
+                "$base-$safeVersion.apk"
+            } else {
+                "$base.apk"
+            }
+        }
     }
 
     private fun fetchGitHubApi(apiUrl: String): Pair<Int, String?> {
@@ -196,14 +211,7 @@ class UpdateChecker(private val context: Context) {
         }
     }
 
-    fun resolveTargetFileName(info: UpdateInfo): String {
-        val rawFileName = if (info.fileName.isNotBlank()) {
-            info.fileName
-        } else {
-            info.downloadUrl.substringAfterLast("/").substringBefore("?").ifBlank { "antigravity-update-${info.version}.apk" }
-        }
-        return if (rawFileName.endsWith(".apk", ignoreCase = true)) rawFileName else "$rawFileName.apk"
-    }
+    fun resolveTargetFileName(info: UpdateInfo): String = Companion.resolveTargetFileName(info)
 
     /**
      * Checks DownloadManager and local app downloads directory to see if [info]
