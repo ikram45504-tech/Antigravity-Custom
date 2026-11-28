@@ -198,29 +198,11 @@ class SettingsPreferencesDelegate {
             themeMode = themeMode,
             accentColor = accentColor
         )
-        mutableSelectedModel.value = savedModel
-
-        val savedCliId = prefs.getString(AntigravityViewModel.KEY_SELECTED_MODEL_CLI_ID, null)
-        val cleanSavedCliId = savedCliId?.let { AgyModelsService.cleanModelId(it) }
-        val sanitizedBudget = sanitizeBudgetForCliId(cleanSavedCliId, budget)
-        mutableSelectedModelCliId.value = cleanSavedCliId
-        if (savedCliId != cleanSavedCliId || sanitizedBudget != budget) {
-            val prefEditor = prefs.edit()
-            if (cleanSavedCliId != null) {
-                prefEditor.putString(AntigravityViewModel.KEY_SELECTED_MODEL_CLI_ID, cleanSavedCliId)
-            } else {
-                prefEditor.remove(AntigravityViewModel.KEY_SELECTED_MODEL_CLI_ID)
-            }
-            if (sanitizedBudget != budget) {
-                prefEditor.putString(AntigravityViewModel.KEY_THINKING_BUDGET, sanitizedBudget)
-            }
-            prefEditor.apply()
-        }
+        loadSavedModelFromPrefs(prefs, savedModel, budget)
         val cachedCliJson = prefs.getString(AntigravityViewModel.KEY_CLI_MODELS_JSON, null)
         if (!cachedCliJson.isNullOrBlank()) {
             onCliModelsDecoded(AgyModelsService.decodeCliModels(cachedCliJson))
         }
-        mutableThinkingBudget.value = sanitizedBudget
         mutableVerboseThinking.value = verbose
         mutableConversationWidth.value = width
         mutableThemePreset.value = preset
@@ -250,33 +232,88 @@ class SettingsPreferencesDelegate {
         budget: String = mutableThinkingBudget.value,
         cliId: String? = null,
         userQuotaSummary: UserQuotaSummary?,
-        onLog: (String, String) -> Unit
-    ) {
+        onLog: (String, String) -> Unit,
+        persistAsDefault: Boolean = true
+    ): Boolean {
         val availability = userQuotaSummary?.availableModels?.firstOrNull { it.matches(model) }?.availability ?: ModelAvailability.UNKNOWN
 
         if (availability == ModelAvailability.UNAVAILABLE) {
             val unavailMsg = context.getString(R.string.model_toast_not_available, model)
             onLog("Model", unavailMsg)
             Toast.makeText(context, unavailMsg, Toast.LENGTH_SHORT).show()
-            return
+            return false
         }
         val cleanCliId = cliId?.let { AgyModelsService.cleanModelId(it) }
         val effectiveBudget = sanitizeBudgetForCliId(cleanCliId, budget)
         mutableSelectedModel.value = model
         mutableThinkingBudget.value = effectiveBudget
         mutableSelectedModelCliId.value = cleanCliId
-        val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
-        val editor = prefs.edit().putString(AntigravityViewModel.KEY_SELECTED_MODEL, model).putString(AntigravityViewModel.KEY_THINKING_BUDGET, effectiveBudget)
-        if (cleanCliId != null) editor.putString(AntigravityViewModel.KEY_SELECTED_MODEL_CLI_ID, cleanCliId) else editor.remove(AntigravityViewModel.KEY_SELECTED_MODEL_CLI_ID)
-        editor.apply()
+        if (persistAsDefault) {
+            val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
+            val editor = prefs.edit().putString(AntigravityViewModel.KEY_SELECTED_MODEL, model).putString(AntigravityViewModel.KEY_THINKING_BUDGET, effectiveBudget)
+            if (cleanCliId != null) editor.putString(AntigravityViewModel.KEY_SELECTED_MODEL_CLI_ID, cleanCliId) else editor.remove(AntigravityViewModel.KEY_SELECTED_MODEL_CLI_ID)
+            editor.apply()
+        }
         val thinkingDesc = if (effectiveBudget.isNotBlank()) "$effectiveBudget Thinking" else "Default"
         onLog("Model", "Selected model: $model ($thinkingDesc)")
+        return true
     }
 
-    fun setThinkingBudget(context: Context, budget: String) {
-        mutableThinkingBudget.value = budget
+    fun applyConversationModel(
+        context: Context?,
+        modelName: String?,
+        cliId: String?,
+        budget: String?
+    ) {
+        if (!modelName.isNullOrBlank()) {
+            val cleanCliId = cliId?.let { AgyModelsService.cleanModelId(it) }
+            val effectiveBudget = sanitizeBudgetForCliId(cleanCliId, budget.orEmpty())
+            mutableSelectedModel.value = modelName
+            mutableSelectedModelCliId.value = cleanCliId
+            mutableThinkingBudget.value = effectiveBudget
+        } else if (context != null) {
+            restoreDefaultModel(context)
+        }
+    }
+
+    fun restoreDefaultModel(context: Context) {
         val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putString(AntigravityViewModel.KEY_THINKING_BUDGET, budget).apply()
+        val savedModel = prefs.getString(AntigravityViewModel.KEY_SELECTED_MODEL, "") ?: ""
+        val budget = prefs.getString(AntigravityViewModel.KEY_THINKING_BUDGET, "") ?: ""
+        loadSavedModelFromPrefs(prefs, savedModel, budget)
+    }
+
+    private fun loadSavedModelFromPrefs(
+        prefs: android.content.SharedPreferences,
+        savedModel: String,
+        budget: String
+    ) {
+        mutableSelectedModel.value = savedModel
+        val savedCliId = prefs.getString(AntigravityViewModel.KEY_SELECTED_MODEL_CLI_ID, null)
+        val cleanSavedCliId = savedCliId?.let { AgyModelsService.cleanModelId(it) }
+        val sanitizedBudget = sanitizeBudgetForCliId(cleanSavedCliId, budget)
+        mutableSelectedModelCliId.value = cleanSavedCliId
+        mutableThinkingBudget.value = sanitizedBudget
+        if (savedCliId != cleanSavedCliId || sanitizedBudget != budget) {
+            val prefEditor = prefs.edit()
+            if (cleanSavedCliId != null) {
+                prefEditor.putString(AntigravityViewModel.KEY_SELECTED_MODEL_CLI_ID, cleanSavedCliId)
+            } else {
+                prefEditor.remove(AntigravityViewModel.KEY_SELECTED_MODEL_CLI_ID)
+            }
+            if (sanitizedBudget != budget) {
+                prefEditor.putString(AntigravityViewModel.KEY_THINKING_BUDGET, sanitizedBudget)
+            }
+            prefEditor.apply()
+        }
+    }
+
+    fun setThinkingBudget(context: Context, budget: String, persistAsDefault: Boolean = true) {
+        mutableThinkingBudget.value = budget
+        if (persistAsDefault) {
+            val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putString(AntigravityViewModel.KEY_THINKING_BUDGET, budget).apply()
+        }
     }
 
     private fun sanitizeBudgetForCliId(cliId: String?, budget: String): String {

@@ -62,6 +62,7 @@ class ConversationManagerDelegate {
         context: Context,
         scope: CoroutineScope,
         onWorkspaceChange: (String) -> Unit,
+        onConversationActivated: (ConversationSummary) -> Unit = {},
         onMessagesLoaded: (List<ChatMessage>) -> Unit
     ) {
         loadMessagesJob?.cancel()
@@ -79,6 +80,7 @@ class ConversationManagerDelegate {
                 saveLastActiveConversationId(context, activeSummary.id)
                 withContext(Dispatchers.Main) {
                     onWorkspaceChange(activeSummary.projectPath.orEmpty())
+                    onConversationActivated(activeSummary)
                     onMessagesLoaded(loadedMessages)
                 }
             } else {
@@ -308,8 +310,8 @@ class ConversationManagerDelegate {
         if (currentMessages.isNotEmpty()) {
             val title = mutableConversationTitle.value
             val convId = currentId ?: UUID.randomUUID().toString()
-            val existingProjectPath = mutableConversationHistory.value
-                .firstOrNull { it.id == convId }
+            val existingSummary = mutableConversationHistory.value.firstOrNull { it.id == convId }
+            val existingProjectPath = existingSummary
                 ?.projectPath
                 ?.takeIf { it.isNotBlank() }
             val summary = ConversationSummary(
@@ -318,7 +320,10 @@ class ConversationManagerDelegate {
                 timestamp = System.currentTimeMillis(),
                 messageCount = currentMessages.size,
                 isPinned = mutableIsConversationPinned.value,
-                projectPath = existingProjectPath ?: currentWorkspacePath
+                projectPath = existingProjectPath ?: currentWorkspacePath,
+                modelName = existingSummary?.modelName,
+                modelCliId = existingSummary?.modelCliId,
+                thinkingBudget = existingSummary?.thinkingBudget
             )
             mutableConversationHistory.update { list ->
                 listOf(summary) + list.filter { it.id != convId }

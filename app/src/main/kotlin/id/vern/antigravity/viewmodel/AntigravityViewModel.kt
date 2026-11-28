@@ -137,7 +137,10 @@ data class ConversationSummary(
     val timestamp: Long,
     val messageCount: Int,
     val isPinned: Boolean = false,
-    val projectPath: String? = null
+    val projectPath: String? = null,
+    val modelName: String? = null,
+    val modelCliId: String? = null,
+    val thinkingBudget: String? = null
 )
 
 data class CustomizationItem(
@@ -777,11 +780,53 @@ class AntigravityViewModel : ViewModel() {
         integrationsDelegate.onActiveWorkspaceChanged(context, workspacePath.value, viewModelScope)
     }
 
-    fun setModel(context: Context, model: String, budget: String = thinkingBudget.value, cliId: String? = null) =
-        settingsPreferencesDelegate.setModel(context, model, budget, cliId, mutableUserQuotaSummary.value, ::addLog)
+    fun setModel(context: Context, model: String, budget: String = thinkingBudget.value, cliId: String? = null) {
+        val currentConvId = activeConversationId.value
+        val applied = settingsPreferencesDelegate.setModel(
+            context = context,
+            model = model,
+            budget = budget,
+            cliId = cliId,
+            userQuotaSummary = mutableUserQuotaSummary.value,
+            onLog = ::addLog,
+            persistAsDefault = currentConvId == null
+        )
+        if (applied && currentConvId != null) {
+            saveActiveConversationModel(context, currentConvId)
+        }
+    }
 
-    fun setThinkingBudget(context: Context, budget: String) =
-        settingsPreferencesDelegate.setThinkingBudget(context, budget)
+    fun setThinkingBudget(context: Context, budget: String) {
+        val currentConvId = activeConversationId.value
+        settingsPreferencesDelegate.setThinkingBudget(
+            context = context,
+            budget = budget,
+            persistAsDefault = currentConvId == null
+        )
+        if (currentConvId != null) {
+            saveActiveConversationModel(context, currentConvId)
+        }
+    }
+
+    private fun saveActiveConversationModel(context: Context, convId: String) {
+        val modelName = selectedModel.value.takeIf { it.isNotBlank() }
+        val cliId = selectedModelCliId.value
+        val budget = thinkingBudget.value.takeIf { it.isNotBlank() }
+        conversationManagerDelegate.updateConversationHistoryDirect { list ->
+            list.map { summary ->
+                if (summary.id == convId) {
+                    summary.copy(
+                        modelName = modelName,
+                        modelCliId = cliId,
+                        thinkingBudget = budget
+                    )
+                } else {
+                    summary
+                }
+            }
+        }
+        saveConversationHistory(context)
+    }
 
     fun setVerboseThinking(context: Context, verbose: Boolean) =
         settingsPreferencesDelegate.setVerboseThinking(context, verbose)
@@ -1420,6 +1465,14 @@ class AntigravityViewModel : ViewModel() {
             context = context,
             scope = viewModelScope,
             onWorkspaceChange = { setWorkspacePath(context, it) },
+            onConversationActivated = { summary ->
+                settingsPreferencesDelegate.applyConversationModel(
+                    context = context,
+                    modelName = summary.modelName,
+                    cliId = summary.modelCliId,
+                    budget = summary.thinkingBudget
+                )
+            },
             onMessagesLoaded = { loaded ->
                 val cid = activeConversationId.value
                 if (cid != null) {
@@ -1451,6 +1504,9 @@ class AntigravityViewModel : ViewModel() {
                 mutableAttachedFiles.value = emptyList()
             }
         )
+        if (context != null) {
+            settingsPreferencesDelegate.restoreDefaultModel(context)
+        }
         syncForegroundExecutionState()
     }
     fun loadConversation(context: Context, summary: ConversationSummary) {
@@ -1479,6 +1535,12 @@ class AntigravityViewModel : ViewModel() {
             },
             onLog = ::addLog
         )
+        settingsPreferencesDelegate.applyConversationModel(
+            context = context,
+            modelName = summary.modelName,
+            cliId = summary.modelCliId,
+            budget = summary.thinkingBudget
+        )
         if (cachedLive != null) {
             mutableChatMessages.value = cachedLive
         }
@@ -1489,6 +1551,12 @@ class AntigravityViewModel : ViewModel() {
             summary = summary,
             onWorkspaceChange = { projectWorkspaceDelegate.setWorkspacePathDirect(it) },
             onLog = ::addLog
+        )
+        settingsPreferencesDelegate.applyConversationModel(
+            context = null,
+            modelName = summary.modelName,
+            cliId = summary.modelCliId,
+            budget = summary.thinkingBudget
         )
         val cid = summary.id
         if (messagesByConv.containsKey(cid)) {
@@ -2456,13 +2524,31 @@ class AntigravityViewModel : ViewModel() {
 
         val existingSummary = conversationHistory.value.find { it.id == convId }
         val resolvedProjectPath = existingSummary?.projectPath?.takeIf { it.isNotBlank() } ?: workspacePath.value
+        val resolvedModelName = if (isForeground) {
+            selectedModel.value.takeIf { it.isNotBlank() }
+        } else {
+            existingSummary?.modelName?.takeIf { it.isNotBlank() } ?: selectedModel.value.takeIf { it.isNotBlank() }
+        }
+        val resolvedModelCliId = if (isForeground) {
+            selectedModelCliId.value
+        } else {
+            existingSummary?.modelCliId ?: selectedModelCliId.value
+        }
+        val resolvedThinkingBudget = if (isForeground) {
+            thinkingBudget.value.takeIf { it.isNotBlank() }
+        } else {
+            existingSummary?.thinkingBudget ?: thinkingBudget.value.takeIf { it.isNotBlank() }
+        }
         val currentSummary = ConversationSummary(
             id = convId,
             title = resolvedTitle,
             timestamp = System.currentTimeMillis(),
             messageCount = updatedMessages.size,
             isPinned = if (isForeground) isConversationPinned.value else (existingSummary?.isPinned ?: false),
-            projectPath = resolvedProjectPath
+            projectPath = resolvedProjectPath,
+            modelName = resolvedModelName,
+            modelCliId = resolvedModelCliId,
+            thinkingBudget = resolvedThinkingBudget
         )
         conversationManagerDelegate.updateConversationHistoryDirect { list ->
             listOf(currentSummary) + list.filter { it.id != convId }
@@ -2596,6 +2682,9 @@ class AntigravityViewModel : ViewModel() {
         onEphemeralResult: ((String, Boolean) -> Unit)? = null
     ) {
         jobsByConv.remove(convId)?.cancel()
+        val convSummary = conversationHistory.value.firstOrNull { it.id == convId }
+        val turnCliId = convSummary?.modelCliId ?: selectedModelCliId.value
+        val turnThinkingBudget = convSummary?.thinkingBudget ?: thinkingBudget.value
         val job = viewModelScope.launch(Dispatchers.IO) {
             executionWakeLock.acquire(context, 30 * 60 * 1000L)
             mutableExecutingConvIds.update { it + convId }
@@ -2604,9 +2693,9 @@ class AntigravityViewModel : ViewModel() {
 
             val callbacks = object : TurnExecutionDelegate.Callbacks {
                 override fun workspacePath(): String? = workspacePath.value
-                override fun selectedModelCliId(): String? = selectedModelCliId.value
+                override fun selectedModelCliId(): String? = turnCliId
                 override fun securityPreset(): String = securityPreset.value
-                override fun thinkingBudget(): String = thinkingBudget.value
+                override fun thinkingBudget(): String = turnThinkingBudget
                 override fun skipPermissions(): Boolean = skipPermissions.value
                 override fun enableTerminalSandbox(): Boolean = permissionState.value.enableTerminalSandbox
                 override fun getCliSessionId(convId: String): String? {

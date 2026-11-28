@@ -114,6 +114,9 @@ object ConversationPersistence {
                 put("messageCount", item.messageCount)
                 put("isPinned", item.isPinned)
                 if (item.projectPath != null) put("projectPath", item.projectPath)
+                if (item.modelName != null) put("modelName", item.modelName)
+                if (item.modelCliId != null) put("modelCliId", item.modelCliId)
+                if (item.thinkingBudget != null) put("thinkingBudget", item.thinkingBudget)
             }
             jsonArray.put(obj)
         }
@@ -136,7 +139,10 @@ object ConversationPersistence {
                             timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
                             messageCount = obj.optInt("messageCount", 0),
                             isPinned = obj.optBoolean("isPinned", false),
-                            projectPath = if (obj.has("projectPath")) obj.getString("projectPath") else null
+                            projectPath = if (obj.has("projectPath") && !obj.isNull("projectPath")) obj.getString("projectPath") else null,
+                            modelName = if (obj.has("modelName") && !obj.isNull("modelName")) obj.getString("modelName") else null,
+                            modelCliId = if (obj.has("modelCliId") && !obj.isNull("modelCliId")) obj.getString("modelCliId") else null,
+                            thinkingBudget = if (obj.has("thinkingBudget") && !obj.isNull("thinkingBudget")) obj.getString("thinkingBudget") else null
                         )
                     )
                 }
@@ -394,6 +400,15 @@ object ConversationPersistence {
                             isPinned = obj.optBoolean("isPinned", false),
                             projectPath = if (obj.has("projectPath") && !obj.isNull("projectPath")) {
                                 obj.getString("projectPath")
+                            } else null,
+                            modelName = if (obj.has("modelName") && !obj.isNull("modelName")) {
+                                obj.getString("modelName")
+                            } else null,
+                            modelCliId = if (obj.has("modelCliId") && !obj.isNull("modelCliId")) {
+                                obj.getString("modelCliId")
+                            } else null,
+                            thinkingBudget = if (obj.has("thinkingBudget") && !obj.isNull("thinkingBudget")) {
+                                obj.getString("thinkingBudget")
                             } else null
                         )
                     )
