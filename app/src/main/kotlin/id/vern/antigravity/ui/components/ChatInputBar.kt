@@ -105,10 +105,13 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -1300,11 +1303,14 @@ fun ChatInputBar(
                         )
                     }
 
+                    var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+
                     BasicTextField(
                         value = inputFieldValue,
                         onValueChange = { newValue ->
                             inputFieldValue = newValue
                         },
+                        onTextLayout = { textLayoutResult = it },
                         textStyle = TextStyle(
                             color = MaterialTheme.colorScheme.onSurface,
                             fontSize = 14.sp,
@@ -1326,6 +1332,30 @@ fun ChatInputBar(
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
+                            .pointerInput(Unit) {
+                                detectTapGestures(
+                                    onDoubleTap = { tapOffset ->
+                                        val layout = textLayoutResult ?: return@detectTapGestures
+                                        val text = inputFieldValue.text
+                                        if (text.isEmpty()) return@detectTapGestures
+                                        val rawOffset = layout.getOffsetForPosition(tapOffset).coerceIn(0, text.length)
+                                        var probe = if (rawOffset == text.length) rawOffset - 1 else rawOffset
+                                        if (text[probe].isWhitespace() && probe > 0 && !text[probe - 1].isWhitespace()) {
+                                            probe -= 1
+                                        }
+                                        val iterator = java.text.BreakIterator.getWordInstance()
+                                        iterator.setText(text)
+                                        val start = iterator.preceding(probe + 1)
+                                        val end = iterator.following(probe)
+                                        if (start != java.text.BreakIterator.DONE &&
+                                            end != java.text.BreakIterator.DONE &&
+                                            start < end
+                                        ) {
+                                            inputFieldValue = inputFieldValue.copy(selection = TextRange(start, end))
+                                        }
+                                    }
+                                )
+                            }
                             .padding(horizontal = 2.dp, vertical = 2.dp)
                     )
                 }

@@ -2481,7 +2481,11 @@ class AntigravityViewModel : ViewModel() {
                 if (e is kotlinx.coroutines.CancellationException) {
                     if (!ephemeralVoiceOnly) {
                         updateMessagesForConv(convId) { list ->
-                            list.filter { it.role != MessageRole.ASSISTANT || it.status != MessageStatus.SENDING || it.content.isNotBlank() }
+                            list.mapNotNull { msg ->
+                                if (msg.role == MessageRole.ASSISTANT && msg.status == MessageStatus.SENDING) {
+                                    if (msg.content.isNotBlank()) msg.copy(status = MessageStatus.SENT) else null
+                                } else msg
+                            }
                         }
                     }
                 } else {
@@ -2518,6 +2522,11 @@ class AntigravityViewModel : ViewModel() {
                 mutableExecutingConvIds.update { it - convId }
                 runningTasksByConv.update { it - convId }
                 workingStatusByConv.update { it - convId }
+                if (mutableExecutingConvIds.value.isEmpty()) {
+                    mutableRunningSubagents.update { list ->
+                        list.map { if (it.isRunning) it.copy(isRunning = false) else it }
+                    }
+                }
                 if (mutableExecutingConvIds.value.isEmpty()) {
                     executionWakeLock.release()
                 }

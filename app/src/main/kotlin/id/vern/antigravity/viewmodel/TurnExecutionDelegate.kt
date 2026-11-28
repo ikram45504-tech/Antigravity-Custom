@@ -417,7 +417,35 @@ class TurnExecutionDelegate {
 
         val isRefreshingFileChanges = AtomicBoolean(false)
         var liveFileChangesJob: Job? = null
+        var streamFlushJob: Job? = null
         val turnCoroutineContext = coroutineContext
+
+        fun flushStreamOutputNow() {
+            streamFlushJob?.cancel()
+            streamFlushJob = null
+            val currentOutput = outputSb.toString()
+            if (currentOutput.isEmpty()) return
+            lastStreamUpdateMs = System.currentTimeMillis()
+            effectiveCallbacks.updateMessages(convId) { list ->
+                list.map { msg ->
+                    if (msg.id == assistantMsgId && msg.content != currentOutput) {
+                        msg.copy(content = currentOutput)
+                    } else msg
+                }
+            }
+        }
+
+        fun scheduleStreamFlush() {
+            val now = System.currentTimeMillis()
+            if (now - lastStreamUpdateMs > 250L) {
+                flushStreamOutputNow()
+            } else if (streamFlushJob?.isActive != true) {
+                streamFlushJob = CoroutineScope(turnCoroutineContext + Dispatchers.IO).launch {
+                    kotlinx.coroutines.delay(250L)
+                    flushStreamOutputNow()
+                }
+            }
+        }
 
         while (autoContinue && currentTurn < maxAutoTurns && coroutineContext.isActive) {
             currentTurn++
@@ -474,6 +502,7 @@ class TurnExecutionDelegate {
                                     val stepType = stepUpdate.optString("step_type")
                                     val state = stepUpdate.optString("state")
                                     if (stepType == "tool") {
+                                        flushStreamOutputNow()
                                         val parsedTool = parseToolStep(
                                             context = context,
                                             stepUpdate = stepUpdate,
@@ -555,6 +584,7 @@ class TurnExecutionDelegate {
                                             }
                                         }
                                     } else if (stepType == "thought" || stepType == "reasoning") {
+                                        flushStreamOutputNow()
                                         val thoughtText = stepUpdate.optString("text", "")
                                         val duration = stepUpdate.optInt("duration_seconds", 6).coerceAtLeast(1)
                                         val thoughtStep = AgentExecutionStep(
@@ -592,16 +622,7 @@ class TurnExecutionDelegate {
                                         val textDelta = stepUpdate.optString("text_delta", "")
                                         if (textDelta.isNotEmpty()) {
                                             outputSb.append(textDelta)
-                                            val now = System.currentTimeMillis()
-                                            if (now - lastStreamUpdateMs > 250L) {
-                                                lastStreamUpdateMs = now
-                                                val currentOutput = outputSb.toString()
-                                                effectiveCallbacks.updateMessages(convId) { list ->
-                                                    list.map { msg ->
-                                                        if (msg.id == assistantMsgId) msg.copy(content = currentOutput) else msg
-                                                    }
-                                                }
-                                            }
+                                            scheduleStreamFlush()
                                         }
                                     }
                                 }
@@ -610,6 +631,8 @@ class TurnExecutionDelegate {
                                 commandResultObj = json.optJSONObject("command") ?: commandResultObj
                             }
                             "result" -> {
+                                streamFlushJob?.cancel()
+                                streamFlushJob = null
                                 val resultObj = json.optJSONObject("result")
                                 val cmdObj = resultObj?.optJSONObject("command") ?: commandResultObj
                                 val rawResponse = resultObj?.optString("response")
@@ -640,16 +663,7 @@ class TurnExecutionDelegate {
                     } catch (_: Exception) {
                         TerminalSessionManager.appendAgyLine(line)
                         outputSb.append(line).append("\n")
-                        val now = System.currentTimeMillis()
-                        if (now - lastStreamUpdateMs > 250L) {
-                            lastStreamUpdateMs = now
-                            val currentOutput = outputSb.toString()
-                            effectiveCallbacks.updateMessages(convId) { list ->
-                                list.map { msg ->
-                                    if (msg.id == assistantMsgId) msg.copy(content = currentOutput) else msg
-                                }
-                            }
-                        }
+                        scheduleStreamFlush()
                     }
                 } else if (trimmed.isNotEmpty()) {
                     val isModeFallbackWarning = trimmed.startsWith("warning: --mode ", ignoreCase = true) ||
@@ -659,20 +673,15 @@ class TurnExecutionDelegate {
                     } else if (!trimmed.startsWith("Get:") && !trimmed.startsWith("#") && !trimmed.startsWith("Unpacking")) {
                         TerminalSessionManager.appendAgyLine(line)
                         outputSb.append(line).append("\n")
-                        val now = System.currentTimeMillis()
-                        if (now - lastStreamUpdateMs > 250L) {
-                            lastStreamUpdateMs = now
-                            val currentOutput = outputSb.toString()
-                            effectiveCallbacks.updateMessages(convId) { list ->
-                                list.map { msg ->
-                                    if (msg.id == assistantMsgId) msg.copy(content = currentOutput) else msg
-                                }
-                            }
-                        }
+                        scheduleStreamFlush()
                     }
                 }
             }
 
+            streamFlushJob?.cancel()
+            streamFlushJob = null
+            acpFlushJob?.cancel()
+            acpFlushJob = null
             if (outputSb.isNotEmpty()) {
                 val finalCurrentOutput = outputSb.toString()
                 effectiveCallbacks.updateMessages(convId) { list ->
@@ -1152,6 +1161,40 @@ class TurnExecutionDelegate {
             })
 
             var lastUiMs = 0L
+            var acpFlushJob: Job? = null
+            val acpScope = CoroutineScope(coroutineContext + Dispatchers.IO)
+
+            fun flushAcpBuffersNow() {
+                acpFlushJob?.cancel()
+                acpFlushJob = null
+                val curOut = outputSb.toString()
+                val curThought = thoughtSb.toString().takeIf { it.isNotBlank() }
+                if (curOut.isEmpty() && curThought == null) return
+                lastUiMs = System.currentTimeMillis()
+                callbacks.updateMessages(convId) { list ->
+                    list.map { m ->
+                        if (m.id == assistantMsgId) {
+                            m.copy(
+                                content = curOut.ifEmpty { m.content },
+                                thinking = curThought ?: m.thinking
+                            )
+                        } else m
+                    }
+                }
+            }
+
+            fun scheduleAcpFlush() {
+                val now = System.currentTimeMillis()
+                if (now - lastUiMs > 200L) {
+                    flushAcpBuffersNow()
+                } else if (acpFlushJob?.isActive != true) {
+                    acpFlushJob = acpScope.launch {
+                        kotlinx.coroutines.delay(200L)
+                        flushAcpBuffersNow()
+                    }
+                }
+            }
+
             while (coroutineContext.isActive) {
                 val line = reader.readLine() ?: break
                 val t = line.trim()
@@ -1173,31 +1216,18 @@ class TurnExecutionDelegate {
                                 val txt = update.optJSONObject("content")?.optString("text", "").orEmpty()
                                 if (txt.isNotEmpty()) {
                                     thoughtSb.append(txt)
-                                    val now = System.currentTimeMillis()
-                                    if (now - lastUiMs > 250L) {
-                                        lastUiMs = now
-                                        val curThought = thoughtSb.toString()
-                                        callbacks.updateMessages(convId) { list ->
-                                            list.map { m -> if (m.id == assistantMsgId) m.copy(thinking = curThought) else m }
-                                        }
-                                    }
+                                    scheduleAcpFlush()
                                 }
                             }
                             "agent_message_chunk" -> {
                                 val txt = update.optJSONObject("content")?.optString("text", "").orEmpty()
                                 if (txt.isNotEmpty()) {
                                     outputSb.append(txt)
-                                    val now = System.currentTimeMillis()
-                                    if (now - lastUiMs > 200L) {
-                                        lastUiMs = now
-                                        val curOut = outputSb.toString()
-                                        callbacks.updateMessages(convId) { list ->
-                                            list.map { m -> if (m.id == assistantMsgId) m.copy(content = curOut) else m }
-                                        }
-                                    }
+                                    scheduleAcpFlush()
                                 }
                             }
                             "tool_call", "tool_call_update" -> {
+                                flushAcpBuffersNow()
                                 val callId = update.optString("toolCallId", UUID.randomUUID().toString())
                                 val title = update.optString("title", "Tool")
                                 val status = update.optString("status", "")
@@ -1262,6 +1292,8 @@ class TurnExecutionDelegate {
                 }
             }
 
+            acpFlushJob?.cancel()
+            acpFlushJob = null
             if (outputSb.isNotEmpty()) {
                 val finalOut = outputSb.toString()
                 val finalThought = thoughtSb.toString().takeIf { it.isNotBlank() }

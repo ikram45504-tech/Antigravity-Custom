@@ -362,8 +362,15 @@ fun ChatBubble(
 
             val hasExecutionSteps = message.steps.isNotEmpty() || !message.thinking.isNullOrBlank() || message.durationText != null
             if (isSending || hasExecutionSteps) {
+                val activeSubagentStep = if (isSending) {
+                    message.steps.lastOrNull { it.kind == AgentStepKind.WORKING }
+                } else null
                 val durationLabel = if (isSending) {
-                    stringResource(R.string.chat_working_ellipsis)
+                    if (activeSubagentStep != null && activeSubagentStep.title.isNotBlank()) {
+                        "Waiting for ${activeSubagentStep.title}..."
+                    } else {
+                        stringResource(R.string.chat_working_ellipsis)
+                    }
                 } else {
                     stringResource(R.string.chat_worked_for, message.durationText ?: "1m")
                 }
