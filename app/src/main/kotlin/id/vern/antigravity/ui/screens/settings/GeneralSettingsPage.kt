@@ -539,6 +539,8 @@ fun GeneralSettingsPage(
     val liveUseCliFallback by viewModel.liveUseCliFallback.collectAsStateWithLifecycle()
     val geminiLiveApiKey by viewModel.geminiLiveApiKey.collectAsStateWithLifecycle()
     val geminiLiveVertexProject by viewModel.geminiLiveVertexProject.collectAsStateWithLifecycle()
+    val showGeminiLiveButton by viewModel.showGeminiLiveButton.collectAsStateWithLifecycle()
+    val showSpeechToTextButton by viewModel.showSpeechToTextButton.collectAsStateWithLifecycle()
     var showVoiceLanguageMenu by remember { mutableStateOf(false) }
 
     var isPreviewPlaying by remember { mutableStateOf(false) }
@@ -995,6 +997,58 @@ fun GeneralSettingsPage(
                                 Switch(
                                     checked = liveUseCliFallback,
                                     onCheckedChange = { viewModel.setLiveUseCliFallback(context, it) }
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                    Text(
+                                        text = "Show Gemini Live Button",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "Show or hide the Gemini Live button in the chat input bar.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = showGeminiLiveButton,
+                                    onCheckedChange = { viewModel.setShowGeminiLiveButton(context, it) }
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                    Text(
+                                        text = "Show Speech-to-Text Mic Button",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "Hidden by default. Enable to show the dictation mic icon in the chat input bar.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = showSpeechToTextButton,
+                                    onCheckedChange = { viewModel.setShowSpeechToTextButton(context, it) }
                                 )
                             }
 

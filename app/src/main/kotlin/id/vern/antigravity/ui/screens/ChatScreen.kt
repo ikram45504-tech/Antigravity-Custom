@@ -277,6 +277,8 @@ fun ChatScreen(
     val liveUseCliFallback by viewModel.liveUseCliFallback.collectAsStateWithLifecycle()
     val geminiLiveApiKey by viewModel.geminiLiveApiKey.collectAsStateWithLifecycle()
     val geminiLiveVertexProject by viewModel.geminiLiveVertexProject.collectAsStateWithLifecycle()
+    val showGeminiLiveButton by viewModel.showGeminiLiveButton.collectAsStateWithLifecycle()
+    val showSpeechToTextButton by viewModel.showSpeechToTextButton.collectAsStateWithLifecycle()
 
     val geminiLiveClient = remember(context) {
         GeminiLiveClient(
@@ -1274,6 +1276,8 @@ fun ChatScreen(
                     onVoiceSpeechRateChange = { rate -> viewModel.setVoiceSpeechRate(context, rate) },
                     voiceOnlyMode = voiceOnlyMode,
                     onToggleVoiceOnlyMode = { enabled -> viewModel.setVoiceOnlyMode(context, enabled) },
+                    showGeminiLiveButton = showGeminiLiveButton,
+                    showSpeechToTextButton = showSpeechToTextButton,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(

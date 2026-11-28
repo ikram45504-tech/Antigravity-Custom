@@ -136,6 +136,12 @@ class SettingsPreferencesDelegate {
     private val mutableGeminiLiveVertexProject = MutableStateFlow("")
     val geminiLiveVertexProject: StateFlow<String> = mutableGeminiLiveVertexProject.asStateFlow()
 
+    private val mutableShowGeminiLiveButton = MutableStateFlow(true)
+    val showGeminiLiveButton: StateFlow<Boolean> = mutableShowGeminiLiveButton.asStateFlow()
+
+    private val mutableShowSpeechToTextButton = MutableStateFlow(false)
+    val showSpeechToTextButton: StateFlow<Boolean> = mutableShowSpeechToTextButton.asStateFlow()
+
     fun loadPreferences(
         context: Context,
         onCliModelsDecoded: (List<CliModel>) -> Unit,
@@ -185,6 +191,8 @@ class SettingsPreferencesDelegate {
         mutableLiveUseCliFallback.value = prefs.getBoolean(AntigravityViewModel.KEY_LIVE_USE_CLI_FALLBACK, false)
         mutableGeminiLiveApiKey.value = prefs.getString(AntigravityViewModel.KEY_GEMINI_LIVE_API_KEY, "") ?: ""
         mutableGeminiLiveVertexProject.value = prefs.getString(AntigravityViewModel.KEY_GEMINI_LIVE_VERTEX_PROJECT, "") ?: ""
+        mutableShowGeminiLiveButton.value = prefs.getBoolean(AntigravityViewModel.KEY_SHOW_GEMINI_LIVE_BTN, true)
+        mutableShowSpeechToTextButton.value = prefs.getBoolean(AntigravityViewModel.KEY_SHOW_SPEECH_TO_TEXT_BTN, false)
 
         mutableAppearanceConfig.value = AppearanceConfig(
             themeMode = themeMode,
@@ -567,6 +575,20 @@ class SettingsPreferencesDelegate {
         val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putString(AntigravityViewModel.KEY_GEMINI_LIVE_VERTEX_PROJECT, trimmed).apply()
         onLog("Voice", "Updated Gemini Live Vertex project: ${trimmed.ifEmpty { "(none)" }}")
+    }
+
+    fun setShowGeminiLiveButton(context: Context, show: Boolean, onLog: (String, String) -> Unit) {
+        mutableShowGeminiLiveButton.value = show
+        val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(AntigravityViewModel.KEY_SHOW_GEMINI_LIVE_BTN, show).apply()
+        onLog("Voice", "Show Gemini Live button: $show")
+    }
+
+    fun setShowSpeechToTextButton(context: Context, show: Boolean, onLog: (String, String) -> Unit) {
+        mutableShowSpeechToTextButton.value = show
+        val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(AntigravityViewModel.KEY_SHOW_SPEECH_TO_TEXT_BTN, show).apply()
+        onLog("Voice", "Show Speech-to-Text mic button: $show")
     }
 
     fun refreshPermissions(context: Context, scope: CoroutineScope) {

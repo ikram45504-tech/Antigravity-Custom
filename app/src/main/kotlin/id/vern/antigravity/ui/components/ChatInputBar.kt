@@ -245,6 +245,8 @@ fun ChatInputBar(
     onVoiceSpeechRateChange: (Float) -> Unit = {},
     voiceOnlyMode: Boolean = true,
     onToggleVoiceOnlyMode: (Boolean) -> Unit = {},
+    showGeminiLiveButton: Boolean = true,
+    showSpeechToTextButton: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -1421,47 +1423,52 @@ fun ChatInputBar(
 
                     Spacer(modifier = Modifier.width(6.dp))
 
+                    val shortModelName = remember(selectedModel) {
+                        selectedModel
+                            .replace(Regex("^(Gemini|Claude|Anthropic|OpenAI)\\s+", RegexOption.IGNORE_CASE), "")
+                            .trim()
+                    }
                     val pillText = when {
-                        selectedModel.isBlank() -> stringResource(R.string.chat_model_select)
-                        thinkingBudget.isNotBlank() -> "$selectedModel $thinkingBudget"
-                        else -> selectedModel
+                        shortModelName.isBlank() -> stringResource(R.string.chat_model_select)
+                        thinkingBudget.isNotBlank() -> "$shortModelName $thinkingBudget"
+                        else -> shortModelName
                     }
 
                     Surface(
-                        shape = RoundedCornerShape(18.dp),
+                        shape = RoundedCornerShape(16.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
                         modifier = Modifier
-                            .widthIn(max = 185.dp)
-                            .clip(RoundedCornerShape(18.dp))
+                            .widthIn(max = 175.dp)
+                            .clip(RoundedCornerShape(16.dp))
                             .clickable { onModelSelectorClick() }
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.AutoAwesome,
                                 contentDescription = null,
-                                modifier = Modifier.size(15.dp),
+                                modifier = Modifier.size(13.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(5.dp))
                             Text(
                                 text = pillText,
                                 style = MaterialTheme.typography.labelMedium.copy(
                                     fontWeight = FontWeight.Medium,
-                                    fontSize = 12.5.sp
+                                    fontSize = 11.sp
                                 ),
                                 color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f, fill = false)
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(3.dp))
                             Icon(
                                 imageVector = Icons.Default.KeyboardArrowDown,
                                 contentDescription = stringResource(R.string.chat_model_select),
-                                modifier = Modifier.size(16.dp),
+                                modifier = Modifier.size(14.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -1469,64 +1476,68 @@ fun ChatInputBar(
 
                     Spacer(modifier = Modifier.weight(1f))
 
-                    Box(
-                        modifier = Modifier
-                            .requiredSize(36.dp)
-                            .clip(CircleShape)
-                            .background(
-                                if (liveVoiceState.active) AntigravityBlue.copy(alpha = 0.28f)
-                                else AntigravityBlue.copy(alpha = 0.16f)
+                    if (showGeminiLiveButton) {
+                        Box(
+                            modifier = Modifier
+                                .requiredSize(36.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (liveVoiceState.active) AntigravityBlue.copy(alpha = 0.28f)
+                                    else AntigravityBlue.copy(alpha = 0.16f)
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    color = AntigravityBlue.copy(alpha = if (liveVoiceState.active) 0.55f else 0.25f),
+                                    shape = CircleShape
+                                )
+                                .clickable { onToggleLiveVoice() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_live_sparkle),
+                                contentDescription = stringResource(R.string.chat_live_voice_btn),
+                                tint = AntigravityBlue,
+                                modifier = Modifier.size(19.dp)
                             )
-                            .border(
-                                width = 1.dp,
-                                color = AntigravityBlue.copy(alpha = if (liveVoiceState.active) 0.55f else 0.25f),
-                                shape = CircleShape
-                            )
-                            .clickable { onToggleLiveVoice() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.ic_live_sparkle),
-                            contentDescription = stringResource(R.string.chat_live_voice_btn),
-                            tint = AntigravityBlue,
-                            modifier = Modifier.size(19.dp)
-                        )
+                        }
                     }
 
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Box(
-                        modifier = Modifier
-                            .requiredSize(34.dp)
-                            .clip(CircleShape)
-                            .clickable {
-                                if (onVoiceInputClick != null) {
-                                    onVoiceInputClick()
-                                } else {
-                                    try {
-                                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                                            putExtra(RecognizerIntent.EXTRA_PROMPT, voicePrompt)
-                                            val bcp47 = voiceLanguage.bcp47Tag
-                                            if (!bcp47.isNullOrBlank()) {
-                                                putExtra(RecognizerIntent.EXTRA_LANGUAGE, bcp47)
-                                                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, bcp47)
-                                                putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, bcp47)
+                    if (showSpeechToTextButton) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .requiredSize(34.dp)
+                                .clip(CircleShape)
+                                .clickable {
+                                    if (onVoiceInputClick != null) {
+                                        onVoiceInputClick()
+                                    } else {
+                                        try {
+                                            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                                                putExtra(RecognizerIntent.EXTRA_PROMPT, voicePrompt)
+                                                val bcp47 = voiceLanguage.bcp47Tag
+                                                if (!bcp47.isNullOrBlank()) {
+                                                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, bcp47)
+                                                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, bcp47)
+                                                    putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, bcp47)
+                                                }
                                             }
+                                            speechLauncher.launch(intent)
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "$voiceUnavailableMsg: ${e.message}", Toast.LENGTH_SHORT).show()
                                         }
-                                        speechLauncher.launch(intent)
-                                    } catch (e: Exception) {
-                                        Toast.makeText(context, "$voiceUnavailableMsg: ${e.message}", Toast.LENGTH_SHORT).show()
                                     }
-                                }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Mic,
-                            contentDescription = stringResource(R.string.chat_voice_input),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(19.dp)
-                        )
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Mic,
+                                contentDescription = stringResource(R.string.chat_voice_input),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.width(6.dp))
@@ -1536,7 +1547,7 @@ fun ChatInputBar(
 
                         Box(
                             modifier = Modifier
-                                .requiredSize(36.dp)
+                                .requiredSize(42.dp)
                                 .clip(CircleShape)
                                 .background(AntigravityRed.copy(alpha = 0.2f))
                                 .clickable { onStopExecution() },
@@ -1546,7 +1557,7 @@ fun ChatInputBar(
                                 imageVector = Icons.Default.Stop,
                                 contentDescription = stringResource(R.string.chat_btn_stop),
                                 tint = AntigravityRed,
-                                modifier = Modifier.size(17.dp)
+                                modifier = Modifier.size(19.dp)
                             )
                         }
                     } else {
@@ -1554,11 +1565,11 @@ fun ChatInputBar(
                         val canSend = hasInput
                         Box(
                             modifier = Modifier
-                                .requiredSize(36.dp)
+                                .requiredSize(42.dp)
                                 .clip(CircleShape)
                                 .background(
                                     if (canSend) AntigravityBlue
-                                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                                    else AntigravityBlue.copy(alpha = 0.28f)
                                 )
                                 .clickable(enabled = canSend) {
                                     val text = inputText
@@ -1570,8 +1581,8 @@ fun ChatInputBar(
                             Icon(
                                 imageVector = Icons.Default.ArrowUpward,
                                 contentDescription = stringResource(R.string.chat_btn_send),
-                                tint = if (canSend) Color.White else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.size(18.dp)
+                                tint = if (canSend) Color.White else Color.White.copy(alpha = 0.65f),
+                                modifier = Modifier.size(21.dp)
                             )
                         }
                     }

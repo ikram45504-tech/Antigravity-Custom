@@ -232,6 +232,8 @@ class AntigravityViewModel : ViewModel() {
         const val KEY_LIVE_USE_CLI_FALLBACK = "ag_live_use_cli_fallback"
         const val KEY_GEMINI_LIVE_API_KEY = "ag_gemini_live_api_key"
         const val KEY_GEMINI_LIVE_VERTEX_PROJECT = "ag_gemini_live_vertex_project"
+        const val KEY_SHOW_GEMINI_LIVE_BTN = "ag_show_gemini_live_btn"
+        const val KEY_SHOW_SPEECH_TO_TEXT_BTN = "ag_show_speech_to_text_btn"
         const val VOICE_ONLY_CONV_ID = "__voice_only__"
         const val KEY_USER_PROJECTS = "ag_user_projects"
         const val KEY_CONVERSATION_HISTORY = "ag_conversation_history"
@@ -288,6 +290,8 @@ class AntigravityViewModel : ViewModel() {
     val liveUseCliFallback: StateFlow<Boolean> = settingsPreferencesDelegate.liveUseCliFallback
     val geminiLiveApiKey: StateFlow<String> = settingsPreferencesDelegate.geminiLiveApiKey
     val geminiLiveVertexProject: StateFlow<String> = settingsPreferencesDelegate.geminiLiveVertexProject
+    val showGeminiLiveButton: StateFlow<Boolean> = settingsPreferencesDelegate.showGeminiLiveButton
+    val showSpeechToTextButton: StateFlow<Boolean> = settingsPreferencesDelegate.showSpeechToTextButton
     private val mutableLatestVoiceTurnResult = MutableStateFlow<VoiceTurnResult?>(null)
     val latestVoiceTurnResult: StateFlow<VoiceTurnResult?> = mutableLatestVoiceTurnResult.asStateFlow()
     private val mutableModelLimitReachedInfo = MutableStateFlow<ModelLimitReachedInfo?>(null)
@@ -841,6 +845,12 @@ class AntigravityViewModel : ViewModel() {
 
     fun setGeminiLiveVertexProject(context: Context, projectId: String) =
         settingsPreferencesDelegate.setGeminiLiveVertexProject(context, projectId, ::addLog)
+
+    fun setShowGeminiLiveButton(context: Context, show: Boolean) =
+        settingsPreferencesDelegate.setShowGeminiLiveButton(context, show, ::addLog)
+
+    fun setShowSpeechToTextButton(context: Context, show: Boolean) =
+        settingsPreferencesDelegate.setShowSpeechToTextButton(context, show, ::addLog)
 
     suspend fun executeLiveWorkspaceTool(
         context: Context,
