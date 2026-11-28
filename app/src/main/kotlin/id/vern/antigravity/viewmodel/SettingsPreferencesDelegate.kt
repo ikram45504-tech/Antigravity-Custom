@@ -202,13 +202,17 @@ class SettingsPreferencesDelegate {
 
         val savedCliId = prefs.getString(AntigravityViewModel.KEY_SELECTED_MODEL_CLI_ID, null)
         val cleanSavedCliId = savedCliId?.let { AgyModelsService.cleanModelId(it) }
+        val sanitizedBudget = sanitizeBudgetForCliId(cleanSavedCliId, budget)
         mutableSelectedModelCliId.value = cleanSavedCliId
-        if (savedCliId != cleanSavedCliId) {
+        if (savedCliId != cleanSavedCliId || sanitizedBudget != budget) {
             val prefEditor = prefs.edit()
             if (cleanSavedCliId != null) {
                 prefEditor.putString(AntigravityViewModel.KEY_SELECTED_MODEL_CLI_ID, cleanSavedCliId)
             } else {
                 prefEditor.remove(AntigravityViewModel.KEY_SELECTED_MODEL_CLI_ID)
+            }
+            if (sanitizedBudget != budget) {
+                prefEditor.putString(AntigravityViewModel.KEY_THINKING_BUDGET, sanitizedBudget)
             }
             prefEditor.apply()
         }
@@ -216,7 +220,7 @@ class SettingsPreferencesDelegate {
         if (!cachedCliJson.isNullOrBlank()) {
             onCliModelsDecoded(AgyModelsService.decodeCliModels(cachedCliJson))
         }
-        mutableThinkingBudget.value = budget
+        mutableThinkingBudget.value = sanitizedBudget
         mutableVerboseThinking.value = verbose
         mutableConversationWidth.value = width
         mutableThemePreset.value = preset
@@ -257,14 +261,15 @@ class SettingsPreferencesDelegate {
             return
         }
         val cleanCliId = cliId?.let { AgyModelsService.cleanModelId(it) }
+        val effectiveBudget = sanitizeBudgetForCliId(cleanCliId, budget)
         mutableSelectedModel.value = model
-        mutableThinkingBudget.value = budget
+        mutableThinkingBudget.value = effectiveBudget
         mutableSelectedModelCliId.value = cleanCliId
         val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
-        val editor = prefs.edit().putString(AntigravityViewModel.KEY_SELECTED_MODEL, model).putString(AntigravityViewModel.KEY_THINKING_BUDGET, budget)
+        val editor = prefs.edit().putString(AntigravityViewModel.KEY_SELECTED_MODEL, model).putString(AntigravityViewModel.KEY_THINKING_BUDGET, effectiveBudget)
         if (cleanCliId != null) editor.putString(AntigravityViewModel.KEY_SELECTED_MODEL_CLI_ID, cleanCliId) else editor.remove(AntigravityViewModel.KEY_SELECTED_MODEL_CLI_ID)
         editor.apply()
-        val thinkingDesc = if (budget.isNotBlank()) "$budget Thinking" else "Default"
+        val thinkingDesc = if (effectiveBudget.isNotBlank()) "$effectiveBudget Thinking" else "Default"
         onLog("Model", "Selected model: $model ($thinkingDesc)")
     }
 
@@ -272,6 +277,16 @@ class SettingsPreferencesDelegate {
         mutableThinkingBudget.value = budget
         val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putString(AntigravityViewModel.KEY_THINKING_BUDGET, budget).apply()
+    }
+
+    private fun sanitizeBudgetForCliId(cliId: String?, budget: String): String {
+        if (cliId != null &&
+            AgyModelsService.effortSuffixOf(cliId) == null &&
+            !AgyModelsService.supportsEffortFlag(cliId)
+        ) {
+            return ""
+        }
+        return budget
     }
 
     fun setVerboseThinking(context: Context, verbose: Boolean) {

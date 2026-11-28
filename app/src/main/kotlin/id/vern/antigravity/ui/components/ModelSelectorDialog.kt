@@ -104,6 +104,15 @@ data class DisplayAiModel(
             ?: effortCliIds.entries.firstOrNull { it.key.equals("Medium", ignoreCase = true) }?.value
             ?: effortCliIds.values.firstOrNull()
     }
+
+    fun resolvedEffortFor(requestedEffort: String?): String {
+        if (efforts.isEmpty()) return ""
+        if (!requestedEffort.isNullOrBlank()) {
+            efforts.firstOrNull { it.equals(requestedEffort, ignoreCase = true) }?.let { return it }
+        }
+        return efforts.firstOrNull { it.equals("Medium", ignoreCase = true) }
+            ?: efforts.first()
+    }
 }
 
 fun List<CliModel>.toDisplayAiModels(): List<DisplayAiModel> {
@@ -310,7 +319,8 @@ fun ModelSelectorDialog(
                                 .clip(RoundedCornerShape(10.dp))
                                 .clickable {
                                     if (isAvailableForAccount) {
-                                        onModelSelected(model.id, selectedThinking, model.cliIdFor(selectedThinking))
+                                        val nextEffort = model.resolvedEffortFor(selectedThinking)
+                                        onModelSelected(model.id, nextEffort, model.cliIdFor(nextEffort))
                                     } else {
                                         Toast.makeText(
                                             context,

@@ -651,7 +651,22 @@ class AntigravityViewModel : ViewModel() {
     private fun reconcileSelectionWithCatalog(prefs: android.content.SharedPreferences, catalog: List<CliModel>) {
         if (catalog.isEmpty()) return
         val currentId = selectedModelCliId.value
-        if (currentId != null && catalog.any { it.cliId == currentId }) return
+        val matched = if (currentId != null) catalog.firstOrNull { it.cliId == currentId } else null
+        if (matched != null) {
+            val matchedFamily = catalog.filter { it.displayName == matched.displayName }
+            val supportedEfforts = matchedFamily.mapNotNull { it.effort.takeIf(String::isNotBlank) }
+            val currentBudget = thinkingBudget.value
+            val normalizedBudget = when {
+                supportedEfforts.isEmpty() -> ""
+                currentBudget.isNotBlank() && supportedEfforts.any { it.equals(currentBudget, ignoreCase = true) } -> currentBudget
+                else -> matched.effort
+            }
+            if (normalizedBudget != currentBudget) {
+                settingsPreferencesDelegate.setThinkingBudgetDirect(normalizedBudget)
+                prefs.edit().putString(KEY_THINKING_BUDGET, normalizedBudget).apply()
+            }
+            return
+        }
         val currentName = selectedModel.value
         val family = catalog.filter { it.displayName == currentName }
         val adopted = when {

@@ -97,6 +97,19 @@ object AgyModelsService {
         return null
     }
 
+    /**
+     * Returns true only when `--effort <level>` should be passed to `agy` for [cliId].
+     * Models with an explicit effort suffix already encode their reasoning level in the ID,
+     * and Claude models reject `--effort` in `agy`.
+     */
+    fun supportsEffortFlag(cliId: String): Boolean {
+        val clean = cliId.trim().lowercase()
+        if (clean.isEmpty()) return false
+        if (effortSuffixOf(clean) != null) return false
+        if (clean.contains("claude")) return false
+        return true
+    }
+
     private fun splitDisplayName(raw: String): Pair<String, String?> {
         val trimmed = raw.trim()
         val match = Regex("\\((Low|Medium|High|XHigh|Max|Thinking)\\)\\s*$").find(trimmed)

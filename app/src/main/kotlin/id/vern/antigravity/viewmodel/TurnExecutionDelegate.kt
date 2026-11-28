@@ -928,7 +928,7 @@ class TurnExecutionDelegate {
         }
         val effortArg = thinkingBudget.trim().lowercase()
         if (effortArg in setOf("low", "medium", "high", "xhigh", "max") &&
-            AgyModelsService.effortSuffixOf(cliId) == null
+            AgyModelsService.supportsEffortFlag(cliId)
         ) {
             args.add("--effort")
             args.add(effortArg)

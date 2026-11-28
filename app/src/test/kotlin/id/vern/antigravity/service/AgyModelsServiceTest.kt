@@ -37,4 +37,14 @@ class AgyModelsServiceTest {
         assertNull(AgyModelsService.normalizeEffort(""))
         assertNull(AgyModelsService.normalizeEffort(null))
     }
+
+    @Test
+    fun `supportsEffortFlag disables --effort for claude and effort-suffixed models`() {
+        assertFalse(AgyModelsService.supportsEffortFlag("claude-sonnet-4-6"))
+        assertFalse(AgyModelsService.supportsEffortFlag("claude-opus-4-6-thinking"))
+        assertFalse(AgyModelsService.supportsEffortFlag("gemini-4-hydrogen-high"))
+        assertFalse(AgyModelsService.supportsEffortFlag("gpt-oss-120b-medium"))
+        assertFalse(AgyModelsService.supportsEffortFlag(""))
+        assertTrue(AgyModelsService.supportsEffortFlag("gemini-2.5-pro"))
+    }
 }
