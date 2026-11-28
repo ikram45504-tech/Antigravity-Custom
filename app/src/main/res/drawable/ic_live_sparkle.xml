@@ -1,0 +1,19 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Official-style Gemini Live waveform bars + sparkle -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M4.2,10.5C4.2,9.8 4.8,9.2 5.5,9.2C6.2,9.2 6.8,9.8 6.8,10.5V15.5C6.8,16.2 6.2,16.8 5.5,16.8C4.8,16.8 4.2,16.2 4.2,15.5V10.5Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M8.7,7.5C8.7,6.8 9.3,6.2 10,6.2C10.7,6.2 11.3,6.8 11.3,7.5V18.5C11.3,19.2 10.7,19.8 10,19.8C9.3,19.8 8.7,19.2 8.7,18.5V7.5Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M13.2,9.5C13.2,8.8 13.8,8.2 14.5,8.2C15.2,8.2 15.8,8.8 15.8,9.5V16.5C15.8,17.2 15.2,17.8 14.5,17.8C13.8,17.8 13.2,17.2 13.2,16.5V9.5Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M18.5,3L19.4,5.6L22,6.5L19.4,7.4L18.5,10L17.6,7.4L15,6.5L17.6,5.6L18.5,3Z" />
+</vector>

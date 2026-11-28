@@ -536,6 +536,9 @@ fun GeneralSettingsPage(
     val voiceReplyInLanguage by viewModel.voiceReplyInLanguage.collectAsStateWithLifecycle()
     val voiceSpeechRate by viewModel.voiceSpeechRate.collectAsStateWithLifecycle()
     val voiceOnlyMode by viewModel.voiceOnlyMode.collectAsStateWithLifecycle()
+    val liveUseCliFallback by viewModel.liveUseCliFallback.collectAsStateWithLifecycle()
+    val geminiLiveApiKey by viewModel.geminiLiveApiKey.collectAsStateWithLifecycle()
+    val geminiLiveVertexProject by viewModel.geminiLiveVertexProject.collectAsStateWithLifecycle()
     var showVoiceLanguageMenu by remember { mutableStateOf(false) }
 
     var isPreviewPlaying by remember { mutableStateOf(false) }
@@ -967,6 +970,52 @@ fun GeneralSettingsPage(
                                     onCheckedChange = { viewModel.setVoiceOnlyMode(context, it) }
                                 )
                             }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                    Text(
+                                        text = "Use Agent Voice (CLI) Fallback",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "Off = Official-style real-time WebSocket audio (OAuth / API key). On = Local SpeechRecognizer + agy CLI.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = liveUseCliFallback,
+                                    onCheckedChange = { viewModel.setLiveUseCliFallback(context, it) }
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+                            OutlinedTextField(
+                                value = geminiLiveApiKey,
+                                onValueChange = { viewModel.setGeminiLiveApiKey(context, it) },
+                                label = { Text("Gemini Live API Key (optional)") },
+                                placeholder = { Text("Leave blank to use Google OAuth") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = geminiLiveVertexProject,
+                                onValueChange = { viewModel.setGeminiLiveVertexProject(context, it) },
+                                label = { Text("Vertex AI Project ID (optional)") },
+                                placeholder = { Text("Optional GCP project for OAuth Live") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
 
                             Spacer(modifier = Modifier.height(14.dp))
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))

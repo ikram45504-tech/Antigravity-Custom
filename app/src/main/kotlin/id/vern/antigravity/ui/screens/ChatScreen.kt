@@ -88,6 +88,9 @@ import androidx.core.content.ContextCompat
 import id.vern.antigravity.data.MessageStatus
 import id.vern.antigravity.data.RunningSubagent
 import id.vern.antigravity.data.ThemeMode
+import id.vern.antigravity.ui.components.LiveVoiceOverlay
+import id.vern.antigravity.voice.GeminiLiveClient
+import id.vern.antigravity.voice.GeminiLiveConfig
 import id.vern.antigravity.voice.LiveVoiceController
 import id.vern.antigravity.voice.VoiceLanguage
 import id.vern.antigravity.ui.components.AgentDetailsBottomSheet
@@ -271,14 +274,68 @@ fun ChatScreen(
         )
     }
 
-    DisposableEffect(liveVoiceController) {
-        onDispose { liveVoiceController.destroy() }
+    val liveUseCliFallback by viewModel.liveUseCliFallback.collectAsStateWithLifecycle()
+    val geminiLiveApiKey by viewModel.geminiLiveApiKey.collectAsStateWithLifecycle()
+    val geminiLiveVertexProject by viewModel.geminiLiveVertexProject.collectAsStateWithLifecycle()
+
+    val geminiLiveClient = remember(context) {
+        GeminiLiveClient(
+            context = context,
+            onExecuteTool = { call -> viewModel.executeLiveWorkspaceTool(context, call) },
+            onTurnFinished = { userText, modelText ->
+                viewModel.appendLiveVoiceTurnToChat(context, userText, modelText)
+            },
+            onAuthFallbackRequired = { reason ->
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    viewModel.addLog("Voice", "Gemini Live fallback to CLI voice: $reason")
+                    Toast.makeText(
+                        context,
+                        "Switching to Agent Voice (CLI): $reason",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    liveVoiceController.start()
+                }
+            }
+        )
+    }
+    val geminiLiveState by geminiLiveClient.state.collectAsStateWithLifecycle()
+    val liveMicAmplitude by geminiLiveClient.micAmplitude.collectAsStateWithLifecycle()
+    val liveSpeakerAmplitude by geminiLiveClient.speakerAmplitude.collectAsStateWithLifecycle()
+
+    fun startPreferredLiveVoice() {
+        if (liveUseCliFallback) {
+            liveVoiceController.start()
+        } else {
+            val langInstruction = voiceLanguage.buildVoicePromptInstruction(voiceReplyInLanguage)
+            val baseInstr = "You are Antigravity, a helpful voice coding assistant. " +
+                "When the user asks for reviews, ratings, explanations, or suggestions, inspect files read-only without modifying anything. " +
+                "Only call write_workspace_file or delegate_to_agy_agent when the user explicitly asks you to implement, edit, or execute changes. " +
+                "Be concise, natural, and conversational."
+            val fullInstr = if (!langInstruction.isNullOrBlank()) "$baseInstr $langInstruction" else baseInstr
+            geminiLiveClient.start(
+                GeminiLiveConfig(
+                    apiKey = geminiLiveApiKey,
+                    vertexProjectId = geminiLiveVertexProject,
+                    systemInstruction = fullInstr
+                )
+            )
+        }
     }
 
-    DisposableEffect(lifecycleOwner, liveVoiceController) {
+    DisposableEffect(liveVoiceController, geminiLiveClient) {
+        onDispose {
+            liveVoiceController.destroy()
+            geminiLiveClient.stop()
+        }
+    }
+
+    DisposableEffect(lifecycleOwner, liveVoiceController, geminiLiveClient) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) {
                 liveVoiceController.pause()
+                if (geminiLiveState.active) {
+                    geminiLiveClient.stop()
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -289,7 +346,7 @@ fun ChatScreen(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            liveVoiceController.start()
+            startPreferredLiveVoice()
         } else {
             Toast.makeText(
                 context,
@@ -300,7 +357,9 @@ fun ChatScreen(
     }
 
     val toggleLiveVoice: () -> Unit = {
-        if (liveVoiceState.active) {
+        if (geminiLiveState.active) {
+            geminiLiveClient.stop()
+        } else if (liveVoiceState.active) {
             awaitingVoiceResponse = false
             awaitingVoiceConvId = null
             awaitingVoiceTurnId = null
@@ -312,7 +371,7 @@ fun ChatScreen(
                 Manifest.permission.RECORD_AUDIO
             ) == PackageManager.PERMISSION_GRANTED
             if (hasMicPerm) {
-                liveVoiceController.start()
+                startPreferredLiveVoice()
             } else {
                 recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }
@@ -1504,6 +1563,16 @@ fun ChatScreen(
         InstallationProgressDialog(
             progress = activeInstallProgress!!,
             onDismissRequest = { viewModel.dismissInstallProgress() }
+        )
+    }
+
+    if (geminiLiveState.active) {
+        LiveVoiceOverlay(
+            state = geminiLiveState,
+            micAmplitude = liveMicAmplitude,
+            speakerAmplitude = liveSpeakerAmplitude,
+            onToggleMute = { geminiLiveClient.toggleMute() },
+            onEndSession = { geminiLiveClient.stop() }
         )
     }
 

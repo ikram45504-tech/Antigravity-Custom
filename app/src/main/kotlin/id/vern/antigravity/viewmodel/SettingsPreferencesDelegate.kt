@@ -127,6 +127,15 @@ class SettingsPreferencesDelegate {
     private val mutableVoiceOnlyMode = MutableStateFlow(true)
     val voiceOnlyMode: StateFlow<Boolean> = mutableVoiceOnlyMode.asStateFlow()
 
+    private val mutableLiveUseCliFallback = MutableStateFlow(false)
+    val liveUseCliFallback: StateFlow<Boolean> = mutableLiveUseCliFallback.asStateFlow()
+
+    private val mutableGeminiLiveApiKey = MutableStateFlow("")
+    val geminiLiveApiKey: StateFlow<String> = mutableGeminiLiveApiKey.asStateFlow()
+
+    private val mutableGeminiLiveVertexProject = MutableStateFlow("")
+    val geminiLiveVertexProject: StateFlow<String> = mutableGeminiLiveVertexProject.asStateFlow()
+
     fun loadPreferences(
         context: Context,
         onCliModelsDecoded: (List<CliModel>) -> Unit,
@@ -173,6 +182,9 @@ class SettingsPreferencesDelegate {
         mutableVoiceReplyInLanguage.value = prefs.getBoolean(AntigravityViewModel.KEY_VOICE_REPLY_IN_LANGUAGE, true)
         mutableVoiceSpeechRate.value = prefs.getFloat(AntigravityViewModel.KEY_VOICE_SPEECH_RATE, 0.95f).coerceIn(0.6f, 1.6f)
         mutableVoiceOnlyMode.value = prefs.getBoolean(AntigravityViewModel.KEY_VOICE_ONLY_MODE, true)
+        mutableLiveUseCliFallback.value = prefs.getBoolean(AntigravityViewModel.KEY_LIVE_USE_CLI_FALLBACK, false)
+        mutableGeminiLiveApiKey.value = prefs.getString(AntigravityViewModel.KEY_GEMINI_LIVE_API_KEY, "") ?: ""
+        mutableGeminiLiveVertexProject.value = prefs.getString(AntigravityViewModel.KEY_GEMINI_LIVE_VERTEX_PROJECT, "") ?: ""
 
         mutableAppearanceConfig.value = AppearanceConfig(
             themeMode = themeMode,
@@ -532,6 +544,29 @@ class SettingsPreferencesDelegate {
         val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putBoolean(AntigravityViewModel.KEY_VOICE_ONLY_MODE, enabled).apply()
         onLog("Voice", "Voice-only mode set to: $enabled")
+    }
+
+    fun setLiveUseCliFallback(context: Context, enabled: Boolean, onLog: (String, String) -> Unit) {
+        mutableLiveUseCliFallback.value = enabled
+        val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(AntigravityViewModel.KEY_LIVE_USE_CLI_FALLBACK, enabled).apply()
+        onLog("Voice", "Live CLI fallback mode set to: $enabled")
+    }
+
+    fun setGeminiLiveApiKey(context: Context, apiKey: String, onLog: (String, String) -> Unit) {
+        val trimmed = apiKey.trim()
+        mutableGeminiLiveApiKey.value = trimmed
+        val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(AntigravityViewModel.KEY_GEMINI_LIVE_API_KEY, trimmed).apply()
+        onLog("Voice", if (trimmed.isEmpty()) "Cleared Gemini Live API key" else "Updated Gemini Live API key")
+    }
+
+    fun setGeminiLiveVertexProject(context: Context, projectId: String, onLog: (String, String) -> Unit) {
+        val trimmed = projectId.trim()
+        mutableGeminiLiveVertexProject.value = trimmed
+        val prefs = context.getSharedPreferences(AntigravityViewModel.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(AntigravityViewModel.KEY_GEMINI_LIVE_VERTEX_PROJECT, trimmed).apply()
+        onLog("Voice", "Updated Gemini Live Vertex project: ${trimmed.ifEmpty { "(none)" }}")
     }
 
     fun refreshPermissions(context: Context, scope: CoroutineScope) {

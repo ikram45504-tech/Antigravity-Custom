@@ -229,6 +229,9 @@ class AntigravityViewModel : ViewModel() {
         const val KEY_VOICE_REPLY_IN_LANGUAGE = "ag_voice_reply_in_language"
         const val KEY_VOICE_SPEECH_RATE = "ag_voice_speech_rate"
         const val KEY_VOICE_ONLY_MODE = "ag_voice_only_mode"
+        const val KEY_LIVE_USE_CLI_FALLBACK = "ag_live_use_cli_fallback"
+        const val KEY_GEMINI_LIVE_API_KEY = "ag_gemini_live_api_key"
+        const val KEY_GEMINI_LIVE_VERTEX_PROJECT = "ag_gemini_live_vertex_project"
         const val VOICE_ONLY_CONV_ID = "__voice_only__"
         const val KEY_USER_PROJECTS = "ag_user_projects"
         const val KEY_CONVERSATION_HISTORY = "ag_conversation_history"
@@ -282,6 +285,9 @@ class AntigravityViewModel : ViewModel() {
     val voiceReplyInLanguage: StateFlow<Boolean> = settingsPreferencesDelegate.voiceReplyInLanguage
     val voiceSpeechRate: StateFlow<Float> = settingsPreferencesDelegate.voiceSpeechRate
     val voiceOnlyMode: StateFlow<Boolean> = settingsPreferencesDelegate.voiceOnlyMode
+    val liveUseCliFallback: StateFlow<Boolean> = settingsPreferencesDelegate.liveUseCliFallback
+    val geminiLiveApiKey: StateFlow<String> = settingsPreferencesDelegate.geminiLiveApiKey
+    val geminiLiveVertexProject: StateFlow<String> = settingsPreferencesDelegate.geminiLiveVertexProject
     private val mutableLatestVoiceTurnResult = MutableStateFlow<VoiceTurnResult?>(null)
     val latestVoiceTurnResult: StateFlow<VoiceTurnResult?> = mutableLatestVoiceTurnResult.asStateFlow()
     private val mutableModelLimitReachedInfo = MutableStateFlow<ModelLimitReachedInfo?>(null)
@@ -826,6 +832,145 @@ class AntigravityViewModel : ViewModel() {
 
     fun setVoiceOnlyMode(context: Context, enabled: Boolean) =
         settingsPreferencesDelegate.setVoiceOnlyMode(context, enabled, ::addLog)
+
+    fun setLiveUseCliFallback(context: Context, enabled: Boolean) =
+        settingsPreferencesDelegate.setLiveUseCliFallback(context, enabled, ::addLog)
+
+    fun setGeminiLiveApiKey(context: Context, apiKey: String) =
+        settingsPreferencesDelegate.setGeminiLiveApiKey(context, apiKey, ::addLog)
+
+    fun setGeminiLiveVertexProject(context: Context, projectId: String) =
+        settingsPreferencesDelegate.setGeminiLiveVertexProject(context, projectId, ::addLog)
+
+    suspend fun executeLiveWorkspaceTool(
+        context: Context,
+        call: id.vern.antigravity.voice.LiveToolCall
+    ): org.json.JSONObject =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val wsPath = workspacePath.value
+            val wsDir = if (!wsPath.isNullOrBlank()) java.io.File(wsPath) else null
+            if (wsDir == null || !wsDir.isDirectory) {
+                return@withContext org.json.JSONObject().put("error", "No active workspace directory")
+            }
+            val result = org.json.JSONObject()
+            when (call.name) {
+                "list_workspace_files" -> {
+                    val subdir = call.args.optString("subdir", "").trim()
+                    val target = if (subdir.isEmpty()) wsDir else java.io.File(wsDir, subdir)
+                    val canonicalWs = wsDir.canonicalPath
+                    val canonicalTarget = target.canonicalPath
+                    if (!canonicalTarget.startsWith(canonicalWs)) {
+                        return@withContext result.put("error", "Path outside workspace")
+                    }
+                    val entries = target.listFiles()
+                        ?.filter { it.name != ".git" && it.name != "node_modules" && it.name != "build" }
+                        ?.sortedBy { it.name }
+                        ?.take(80)
+                        ?.map { if (it.isDirectory) "${it.name}/" else it.name }
+                        ?: emptyList()
+                    result.put("files", org.json.JSONArray(entries))
+                }
+                "read_workspace_file" -> {
+                    val relPath = call.args.optString("path", "").trim()
+                    if (relPath.isEmpty()) return@withContext result.put("error", "Missing path")
+                    val target = java.io.File(wsDir, relPath)
+                    if (!target.canonicalPath.startsWith(wsDir.canonicalPath)) {
+                        return@withContext result.put("error", "Path outside workspace")
+                    }
+                    if (!target.isFile) return@withContext result.put("error", "File not found: $relPath")
+                    val text = target.readText(Charsets.UTF_8)
+                    result.put("content", text.take(8000))
+                    if (text.length > 8000) result.put("truncated", true)
+                }
+                "run_workspace_command" -> {
+                    val cmd = call.args.optString("command", "").trim()
+                    if (cmd.isEmpty()) return@withContext result.put("error", "Missing command")
+                    val proc = ProcessBuilder("sh", "-c", cmd)
+                        .directory(wsDir)
+                        .redirectErrorStream(true)
+                        .start()
+                    val finished = proc.waitFor(12, java.util.concurrent.TimeUnit.SECONDS)
+                    val out = proc.inputStream.bufferedReader().readText().take(4000)
+                    if (!finished) proc.destroyForcibly()
+                    result.put("output", out)
+                    result.put("timedOut", !finished)
+                }
+                "write_workspace_file" -> {
+                    val relPath = call.args.optString("path", "").trim()
+                    val content = call.args.optString("content", "")
+                    if (relPath.isEmpty()) return@withContext result.put("error", "Missing path")
+                    val target = java.io.File(wsDir, relPath)
+                    if (!target.canonicalPath.startsWith(wsDir.canonicalPath)) {
+                        return@withContext result.put("error", "Path outside workspace")
+                    }
+                    target.parentFile?.mkdirs()
+                    target.writeText(content, Charsets.UTF_8)
+                    addLog("Voice", "Live wrote file: $relPath (${content.length} chars)")
+                    result.put("status", "written")
+                    result.put("path", relPath)
+                    result.put("bytes", content.toByteArray(Charsets.UTF_8).size)
+                }
+                "delegate_to_agy_agent" -> {
+                    val task = call.args.optString("task", "").trim()
+                    if (task.isEmpty()) return@withContext result.put("error", "Missing task")
+                    val args = mutableListOf("-p", task, "--output-format", "text")
+                    val modelCliId = AgyModelsService.cleanModelId(selectedModel.value)
+                    if (modelCliId.isNotBlank()) {
+                        args.add("--model")
+                        args.add(modelCliId)
+                    }
+                    if (skipPermissions.value) {
+                        args.add("--dangerously-skip-permissions")
+                    }
+                    val outSb = StringBuilder()
+                    val exitCode = EngineExecutor.executeAgy(
+                        context = context,
+                        args = args,
+                        workingDir = wsDir,
+                        executionKey = "live_delegate"
+                    ) { line, _ ->
+                        if (outSb.length < 6000) {
+                            outSb.appendLine(line)
+                        }
+                    }
+                    addLog("Voice", "Live delegated task to agy (exit=$exitCode)")
+                    result.put("exitCode", exitCode)
+                    result.put("output", outSb.toString().trim().take(6000))
+                }
+                else -> result.put("error", "Unknown tool: ${call.name}")
+            }
+            result
+        }
+
+    fun appendLiveVoiceTurnToChat(context: Context, userText: String, modelText: String) {
+        if (voiceOnlyMode.value) return
+        val convId = activeConversationId.value ?: return
+        val additions = mutableListOf<ChatMessage>()
+        if (userText.isNotBlank()) {
+            additions.add(
+                ChatMessage(
+                    id = "live_u_${System.currentTimeMillis()}",
+                    role = MessageRole.USER,
+                    content = userText,
+                    status = MessageStatus.SENT
+                )
+            )
+        }
+        if (modelText.isNotBlank()) {
+            additions.add(
+                ChatMessage(
+                    id = "live_a_${System.currentTimeMillis() + 1}",
+                    role = MessageRole.ASSISTANT,
+                    content = modelText,
+                    status = MessageStatus.SENT
+                )
+            )
+        }
+        if (additions.isNotEmpty()) {
+            updateMessagesForConv(convId) { it + additions }
+            ConversationPersistence.saveMessagesForConversation(context, convId, getMessagesForConversation(convId))
+        }
+    }
 
     fun testPromptCompletionAlert(context: Context) {
         id.vern.antigravity.service.PromptCompletionNotifier.notifyPromptCompleted(
